@@ -59,9 +59,34 @@ class CaptureForegroundService : LifecycleService() {
     private var activeIntervalMs = 0L
     private var minimized = false
     private var started = false
+    private var mediaSession: android.media.session.MediaSession? = null
 
     override fun onCreate() {
         super.onCreate()
+        setupMediaSession()
+    }
+
+    private fun setupMediaSession() {
+        if (mediaSession != null) return
+        runCatching {
+            val session = android.media.session.MediaSession(this, "Merit1MediaSession")
+            val volumeProvider = object : android.media.VolumeProvider(VOLUME_CONTROL_RELATIVE, 100, 50) {
+                override fun onAdjustVolume(direction: Int) {
+                    VolumeKeyDispatcher.dispatchVolumeDown()
+                }
+            }
+            session.setPlaybackToRemote(volumeProvider)
+            session.isActive = true
+            mediaSession = session
+        }
+    }
+
+    private fun releaseMediaSession() {
+        runCatching {
+            mediaSession?.isActive = false
+            mediaSession?.release()
+            mediaSession = null
+        }
     }
 
     override fun onBind(intent: Intent): IBinder {
@@ -72,9 +97,11 @@ class CaptureForegroundService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         started = true
+        setupMediaSession()
         when (intent?.action) {
             ACTION_STOP -> {
                 stopCaptureTask()
+                releaseMediaSession()
                 stopSelf()
             }
             ACTION_SHOW_OVERLAY -> {
@@ -338,6 +365,7 @@ class CaptureForegroundService : LifecycleService() {
 
     override fun onDestroy() {
         stopCaptureTask()
+        releaseMediaSession()
         super.onDestroy()
     }
 

@@ -659,31 +659,43 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun captureScreenUi(onResult: (CaptureResult) -> Unit) {
-        val window = window ?: run {
-            onResult(CaptureResult.Failure(IllegalStateException("Window unavailable")))
-            return
-        }
-        val width = window.decorView.width.coerceAtLeast(1)
-        val height = window.decorView.height.coerceAtLeast(1)
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            android.view.PixelCopy.request(
-                window,
-                bitmap,
-                { copyResult ->
-                    if (copyResult == android.view.PixelCopy.SUCCESS) {
-                        captureEngine?.captureBitmap(bitmap, onResult)
-                    } else {
-                        onResult(CaptureResult.Failure(IllegalStateException("Screen capture failed")))
-                    }
-                },
-                android.os.Handler(android.os.Looper.getMainLooper())
-            )
-        } else {
-            val canvas = android.graphics.Canvas(bitmap)
-            window.decorView.draw(canvas)
-            captureEngine?.captureBitmap(bitmap, onResult)
-        }
+        if (isDestroyed || isFinishing) return
+        setStatus("📸 Capturing Clean Screen...")
+
+        // Temporarily hide overlay windows so they are not in the screenshot
+        overlayManager?.hide()
+
+        upper?.root?.postDelayed({
+            val dm = resources.displayMetrics
+            val width = dm.widthPixels.coerceAtLeast(1)
+            val height = dm.heightPixels.coerceAtLeast(1)
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val win = window
+
+            if (win != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                runCatching {
+                    android.view.PixelCopy.request(
+                        win,
+                        bitmap,
+                        { copyResult ->
+                            overlayManager?.show()
+                            if (copyResult == android.view.PixelCopy.SUCCESS) {
+                                captureEngine?.captureBitmap(bitmap, onResult)
+                            } else {
+                                onResult(CaptureResult.Failure(IllegalStateException("Screen capture failed")))
+                            }
+                        },
+                        android.os.Handler(android.os.Looper.getMainLooper())
+                    )
+                }.onFailure { err ->
+                    overlayManager?.show()
+                    onResult(CaptureResult.Failure(err))
+                }
+            } else {
+                overlayManager?.show()
+                onResult(CaptureResult.Failure(IllegalStateException("Window unavailable")))
+            }
+        }, 150L)
     }
 
     private fun captureSingle(autofocus: Boolean = true) {

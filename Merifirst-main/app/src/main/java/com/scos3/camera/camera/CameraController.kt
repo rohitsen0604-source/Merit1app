@@ -392,17 +392,17 @@ class CameraController(context: Context) {
 
         val initialRatio = currentZoomRatio()
         val (minZoom, maxZoom) = sliderRange()
-        val targetMax = if (maxZoom > minZoom) maxZoom else initialRatio
-        val zoomInRatio = (initialRatio * 1.25f).coerceAtMost(targetMax)
+        val targetMax = if (maxZoom > minZoom) maxZoom else (initialRatio * 2.0f)
+        val zoomInRatio = (initialRatio * 1.4f).coerceAtMost(targetMax)
 
-        // Step 1: Auto Zoom In
+        // Step 1: Auto Zoom In (1.4x zoom)
         setZoomRatio(zoomInRatio)
 
-        // Step 2: Auto Zoom Out back to initial ratio after 120ms
+        // Step 2: Auto Zoom Out back to initial ratio after 180ms
         focusTimeoutHandler.postDelayed({
             setZoomRatio(initialRatio)
 
-            // Step 3: Trigger Auto Focus lock after returning to initial zoom
+            // Step 3: Trigger Auto Focus lock after returning to initial zoom (180ms later)
             focusTimeoutHandler.postDelayed({
                 val focusFuture = runCatching {
                     cam.cameraControl.startFocusAndMetering(
@@ -426,8 +426,8 @@ class CameraController(context: Context) {
                 }
                 focusFuture.addListener(done, mainExecutor)
                 focusTimeoutHandler.postDelayed(done, FOCUS_TIMEOUT_MS)
-            }, 120L)
-        }, 120L)
+            }, 180L)
+        }, 180L)
     }
 
     /** Enables/disables FACE auto-capture and wires the capture trigger. */
