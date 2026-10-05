@@ -258,19 +258,20 @@ class MainActivity : AppCompatActivity() {
                     if (proj != null) {
                         bound.setMediaProjection(proj, resources.displayMetrics)
                     }
-                    val cb = pendingScreenCaptureResult
-                    pendingScreenCaptureResult = null
-                    if (cb != null) {
-                        captureScreenUi(cb)
-                    }
                 } catch (e: Exception) {
                     android.util.Log.e("SCOS3", "Failed to get MediaProjection", e)
-                    val cb = pendingScreenCaptureResult
-                    pendingScreenCaptureResult = null
-                    cb?.invoke(CaptureResult.Failure(e))
                 }
             } else {
                 pendingMediaProjectionData = Pair(result.resultCode, result.data!!)
+            }
+            setScreenMode(true)
+            settingsRepo?.let { repo ->
+                repo.save(repo.load().copy(defaultLens = CameraControllerLens.SCREEN))
+            }
+            val cb = pendingScreenCaptureResult
+            pendingScreenCaptureResult = null
+            if (cb != null) {
+                captureScreenUi(cb)
             }
         } else {
             val cb = pendingScreenCaptureResult
@@ -296,6 +297,7 @@ class MainActivity : AppCompatActivity() {
                     val proj = projectionManager.getMediaProjection(pendingData.first, pendingData.second)
                     if (proj != null) {
                         bound.setMediaProjection(proj, resources.displayMetrics)
+                        setScreenMode(true)
                         val cb = pendingScreenCaptureResult
                         pendingScreenCaptureResult = null
                         if (cb != null) {
@@ -633,28 +635,32 @@ class MainActivity : AppCompatActivity() {
 
     /** Applies the persisted settings (lens, resolution, quality) to the UI and controller. */
     private fun applySettings() {
+        if (screenCaptureMode) {
+            setScreenMode(true)
+            return
+        }
         val settings = settingsRepo?.load() ?: return
         if (settings.defaultLens == CameraControllerLens.SCREEN) {
             setScreenMode(true)
             if (!hasMediaProjection()) {
                 ensureScreenCapturePermission()
             }
-        } else {
-            setScreenMode(false)
-            val target = if (settings.defaultLens == CameraControllerLens.FRONT) Lens.FRONT else Lens.BACK
-            if (hasCameraPermission() && !capturing) {
-                ensureOverlayService()
-                if (controller == null) {
-                    val instance = CameraController(applicationContext)
-                    controller = instance
-                    instance.switchLensTo(target)
-                    applyStoredResolutionAndQuality()
-                    bindCamera()
-                } else {
-                    controller?.switchLensTo(target)
-                    applyStoredResolutionAndQuality()
-                    bindCamera()
-                }
+            return
+        }
+        setScreenMode(false)
+        val target = if (settings.defaultLens == CameraControllerLens.FRONT) Lens.FRONT else Lens.BACK
+        if (hasCameraPermission() && !capturing) {
+            ensureOverlayService()
+            if (controller == null) {
+                val instance = CameraController(applicationContext)
+                controller = instance
+                instance.switchLensTo(target)
+                applyStoredResolutionAndQuality()
+                bindCamera()
+            } else {
+                controller?.switchLensTo(target)
+                applyStoredResolutionAndQuality()
+                bindCamera()
             }
         }
     }
@@ -718,22 +724,22 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (screenCaptureMode) {
-            // SCREEN -> BACK
+            // SCREEN -> BACK CAMERA
             setScreenMode(false)
+            settingsRepo?.let { repo ->
+                repo.save(repo.load().copy(defaultLens = CameraControllerLens.BACK))
+            }
             startCamera()
             controller?.switchLensTo(Lens.BACK)
             bindCamera()
-            Toast.makeText(this, "Back Camera", Toast.LENGTH_SHORT).show()
-        } else if (controller?.currentLens() == Lens.BACK) {
-            // BACK -> FRONT
-            setScreenMode(false)
-            controller?.switchLensTo(Lens.FRONT)
-            bindCamera()
-            Toast.makeText(this, "Front Camera", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "📷 Back Camera Active", Toast.LENGTH_SHORT).show()
         } else {
-            // FRONT -> SCREEN
+            // CAMERA -> SCREEN UI MODE
             setScreenMode(true)
-            Toast.makeText(this, "📱 Screen UI Screenshot Mode", Toast.LENGTH_SHORT).show()
+            settingsRepo?.let { repo ->
+                repo.save(repo.load().copy(defaultLens = CameraControllerLens.SCREEN))
+            }
+            Toast.makeText(this, "📱 Screen UI Screenshot Mode Active", Toast.LENGTH_SHORT).show()
             if (!hasMediaProjection()) {
                 ensureScreenCapturePermission()
             }
@@ -1246,9 +1252,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onVolumeUpPressed() {
-        Log.d("SCOS3-VOL", "volume UP -> toggleAutoCapture")
+        Log.d("SCOS3-VOL", "volume UP -> captureSingle or toggleAutoCapture")
         runOnUiThread {
-            toggleAutoCapture()
+            if (screenCaptureMode) {
+                if (!capturing && !bursting) captureSingle()
+            } else {
+                toggleAutoCapture()
+            }
         }
     }
 
@@ -1275,7 +1285,11 @@ class MainActivity : AppCompatActivity() {
             }
             KeyEvent.KEYCODE_VOLUME_UP -> {
                 if (event.repeatCount == 0) {
-                    toggleAutoCapture()
+                    if (screenCaptureMode) {
+                        if (!capturing && !bursting) captureSingle()
+                    } else {
+                        toggleAutoCapture()
+                    }
                 }
                 true
             }
