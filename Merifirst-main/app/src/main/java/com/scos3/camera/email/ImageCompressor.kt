@@ -138,7 +138,7 @@ class ImageCompressor(context: Context) {
         const val DIRECTORY_NAME = "email_captures"
         const val FILE_PREFIX = "email_"
         const val FILE_DATE_FORMAT = "yyyyMMdd_HHmmssSSS"
-        const val MAX_DIMENSION = 2048
-        const val JPEG_QUALITY = 80
+        const val MAX_DIMENSION = 3840
+        const val JPEG_QUALITY = 92
     }
 }

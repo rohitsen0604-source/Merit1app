@@ -686,7 +686,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun captureSingle(autofocus: Boolean = false) {
+    private fun captureSingle(autofocus: Boolean = true) {
         if (capturing || bursting) return
         setStatus(getString(R.string.status_waiting_camera))
         val onResult: (CaptureResult) -> Unit = { result ->

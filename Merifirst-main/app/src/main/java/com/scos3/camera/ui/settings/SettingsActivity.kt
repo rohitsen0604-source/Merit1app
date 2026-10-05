@@ -203,6 +203,7 @@ class SettingsActivity : AppCompatActivity() {
         settings = currentSettings()
         repository.save(settings)
         Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
+        setResult(RESULT_OK)
         finish()
     }
 
