@@ -1,12 +1,2 @@
-*.iml
-.gradle
-/local.properties
-/.idea
-.DS_Store
-/build
-/app/build
-/captures
-.externalNativeBuild
-.cxx
-*.log
-.kotlin/
+Merit1st_App.apk
+phone_screen.png
