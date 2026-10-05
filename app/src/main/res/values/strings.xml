@@ -1,0 +1,150 @@
+<resources>
+    <string name="app_name">Merit1st</string>
+
+    <!-- Floating camera UI controls (reference layout) -->
+    <string name="btn_black">BLACK</string>
+    <string name="btn_switch">SWITCH</string>
+    <string name="btn_setting">SETTING</string>
+    <string name="btn_help">HELP</string>
+    <string name="btn_burst">BURST</string>
+    <string name="btn_capture">CAPTURE</string>
+    <string name="btn_auto">AUTO</string>
+    <string name="btn_face">FACE</string>
+    <string name="btn_minimize">MINIMIZE</string>
+    <string name="btn_exit">EXIT</string>
+    <string name="slider_size">SIZE</string>
+    <string name="slider_zoom">ZOOM</string>
+    <string name="drag_hint">Merit1st • drag</string>
+
+    <string name="capture">Capture</string>
+    <string name="switch_camera">Switch camera</string>
+    <string name="zoom">Zoom</string>
+
+    <string name="permission_required_message">Merit1st needs the camera to capture images.</string>
+    <string name="permission_allow">Allow camera</string>
+    <string name="permission_denied_message">Camera permission was denied. Grant it in system Settings to use Merit1st.</string>
+    <string name="permission_retry">Try again</string>
+
+    <string name="permission_overlay_title">Draw over other apps</string>
+    <string name="permission_overlay_message">Merit1st shows its camera interface as two overlay sections above the currently running app. Grant the “Display over other apps” permission to enable the overlay sections.</string>
+    <string name="permission_overlay_open">Open settings</string>
+    <string name="permission_overlay_denied">Merit1st needs the “Display over other apps” permission to show the two overlay sections.</string>
+
+    <string name="status_ready">Ready</string>
+    <string name="status_saved">Saved: %1$s</string>
+    <string name="status_waiting_camera">Starting camera…</string>
+    <string name="error_camera_init">Failed to initialize camera</string>
+    <string name="error_capture">Capture failed: %1$s</string>
+    <string name="error_capture_start">Could not start auto capture — the system rejected the background camera service. Try again while the app is open.</string>
+    <string name="status_capture_active">Auto capture active · every %1$s s · %2$d saved</string>
+    <string name="status_capture_starting">Starting auto capture…</string>
+    <string name="status_capture_stopped">Auto capture stopped</string>
+    <string name="status_capture_running">Auto capture is running — stop it first</string>
+    <string name="btn_black_on">BLACK ON</string>
+    <string name="btn_face_on">FACE ON</string>
+    <string name="status_black_on">Blackout on — preview hidden, camera running</string>
+    <string name="status_black_off">Blackout off</string>
+    <string name="status_face_on">Face detection ON</string>
+    <string name="status_face_off">Face detection OFF</string>
+
+    <string name="btn_burst_stop">STOP</string>
+    <string name="status_burst_starting">Burst starting (%1$d photos)…</string>
+    <string name="status_burst_progress">Burst %1$d/%2$d</string>
+    <string name="status_burst_done">Burst done · %1$d saved</string>
+    <string name="status_burst_cancelled">Burst cancelled</string>
+    <string name="status_burst_running">Burst is running — stop it first</string>
+
+    <string name="interval_2">2s</string>
+    <string name="interval_4">4s</string>
+    <string name="interval_6">6s</string>
+    <string name="interval_10">10s</string>
+    <string name="auto_interval_label">every</string>
+    <string name="start_auto_capture">Start auto</string>
+    <string name="stop_auto_capture">Stop capture</string>
+
+    <string name="notif_channel_name">Capture notifications</string>
+    <string name="notif_title">Merit1st</string>
+    <string name="notif_auto_active">Auto capture active</string>
+    <string name="notif_starting">Starting capture…</string>
+    <string name="notif_captured">Every %1$s s · %2$d photo(s)</string>
+    <string name="notif_minimized">Merit1st camera service active — tap to return</string>
+    <string name="notif_minimized_sub">Floating camera running in background</string>
+    <string name="notif_open">Open</string>
+    <string name="notif_stop">Stop</string>
+
+    <string name="home">Home</string>
+    <string name="minimize">Minimize</string>
+    <string name="exit">Exit</string>
+    <string name="settings">Settings</string>
+    <string name="lens_back">Back camera</string>
+    <string name="lens_front">Front camera</string>
+    <string name="lens_screen">📱 Mobile Screen UI (Screenshot)</string>
+
+    <string name="help_title">Merit1st — Help</string>
+    <string name="help_body">\n• CAPTURE — take one photo (Volume Down)\n• BURST — take 5 consecutive photos\n• AUTO — start/stop interval capture (Volume Up)\n• SWITCH — front/back camera\n• SIZE slider (left) — resize the floating camera window\n• ZOOM slider (right) — zoom; drag below 1.0x for ultra-wide where supported\n• Tap the preview — focus\n• MINIMIZE — keep AUTO running in the background (notification shows active state)\n• EXIT — stop everything and close the app</string>
+    <string name="help_diagnostics">Device diagnostics</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_camera">Camera</string>
+    <string name="settings_resolution">Image resolution</string>
+    <string name="settings_resolution_auto">AUTO</string>
+    <string name="settings_quality">Image quality</string>
+    <string name="settings_default_camera">Default camera</string>
+    <string name="settings_ultrawide_available">Dedicated ultra-wide (0.5x) camera detected</string>
+    <string name="settings_ultrawide_unavailable">No dedicated ultra-wide (0.5x) camera detected</string>
+    <string name="settings_section_capture">Capture</string>
+    <string name="settings_auto_interval">Auto capture interval</string>
+    <string name="settings_burst">Burst</string>
+    <string name="settings_face">Face detection</string>
+    <string name="settings_next_phase">Coming in the next phase</string>
+    <string name="settings_section_delivery">Delivery</string>
+    <string name="settings_email_enabled">Email sending</string>
+    <string name="settings_gallery_save_enabled">Save photos to Gallery</string>
+    <string name="settings_delivery_note">Email ON queues every new photo for Gmail delivery. Gallery Save OFF keeps new photos in app-private storage (not shown in the Android Gallery) while remaining available for email.</string>
+    <string name="settings_section_diagnostics">Device</string>
+    <string name="settings_open_diagnostics">Open device diagnostics</string>
+
+    <!-- Volume button control (AccessibilityService) -->
+    <string name="settings_section_volume">Volume button control</string>
+    <string name="settings_volume_enable">Enable Volume Button Control</string>
+    <string name="settings_volume_down_hint">Volume Down = Single Photo</string>
+    <string name="settings_volume_up_hint">Volume Up = Auto Capture</string>
+    <string name="settings_volume_status_enabled">Volume button control is ON. While the Merit1st overlay is active this app uses the Volume buttons; otherwise they behave normally.</string>
+    <string name="settings_volume_status_disabled">Volume button control is OFF. Merit1st still works normally from its own overlay buttons.</string>
+    <string name="settings_volume_open_settings">Open Accessibility Settings</string>
+    <string name="accessibility_service_name">Merit1st volume control</string>
+    <string name="accessibility_service_description">Gives Merit1st Volume-button shortcuts while its floating camera overlay is active: Volume Down takes one photo, Volume Up toggles auto capture. At all other times the Volume buttons behave normally. Merit1st does not read screen content, text, or other apps\' data, and it does not store or send any user information.</string>
+
+    <!-- Diagnostics -->
+    <string name="settings_section_gmail">Gmail (email delivery)</string>
+    <string name="settings_gmail_sender">Sender email</string>
+    <string name="settings_gmail_sender_hint">you@gmail.com</string>
+    <string name="settings_gmail_app_password">Sender app password (Gmail App Password)</string>
+    <string name="settings_gmail_app_password_hint">16-character app password</string>
+    <string name="settings_gmail_receiver">Receiver email</string>
+    <string name="settings_gmail_receiver_hint">recipient@example.com</string>
+    <string name="settings_gmail_note">Credentials are stored encrypted on this device (Android Keystore) and are only used to authenticate SMTP to smtp.gmail.com. This is not Google Sign-In and not app login.</string>
+    <string name="settings_test_email">Test email</string>
+    <string name="settings_testing_email">Sending test email…</string>
+    <string name="settings_clear_gmail">Remove stored credentials</string>
+    <string name="settings_save">Save settings</string>
+    <string name="settings_saved">Settings saved</string>
+    <string name="settings_quality_low">Low (smaller file)</string>
+    <string name="settings_quality_standard">Standard</string>
+    <string name="settings_quality_high">High (best quality)</string>
+
+    <string name="email_error_auth">Gmail authentication failed. Check the sender address and that the 16-character App Password is correct (2-Step Verification must be on).</string>
+    <string name="email_error_network">Network unavailable. The image stays queued and is retried later.</string>
+    <string name="email_error_generic">Email could not be sent. The image stays queued.</string>
+    <string name="email_error_not_configured">Configure sender, app password and receiver first.</string>
+    <string name="email_test_sent">Test email sent.</string>
+
+    <!-- Diagnostics -->
+    <string name="diagnostics_title">Device diagnostics</string>
+    <string name="diagnostics_loading">Reading camera metadata…</string>
+    <string name="diagnostics_copy">Copy</string>
+    <string name="diagnostics_share">Share</string>
+    <string name="diagnostics_ultrawide_supported">0.5x supported</string>
+    <string name="diagnostics_ultrawide_not_exposed">0.5x not exposed by this device/API</string>
+</resources>

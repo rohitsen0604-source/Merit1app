@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <style name="Theme.SCOS3" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@color/black</item>
+        <item name="android:windowBackground">@color/black</item>
+    </style>
+
+    <!--
+        Transparent camera interface. The window is translucent, so whatever is
+        behind the app (usually the home screen) stays visible, matching the
+        client's reference UI. Camera privacy indicators (the green "camera in
+        use" dot) remain fully active; nothing here hides camera use.
+    -->
+    <style name="Theme.SCOS3.Transparent" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+
+    <!--
+        Forced-dark Material theme used by the Settings screen so every widget
+        (spinners, dropdown popups, text fields, cursors, buttons) renders
+        consistently with the SC OS3 dark surface regardless of the system
+        light/dark mode. Visual styling only: no functional changes.
+    -->
+    <style name="Theme.SCOS3.Settings" parent="Theme.MaterialComponents.NoActionBar">
+        <item name="android:statusBarColor">@color/black</item>
+        <item name="android:navigationBarColor">@color/black</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowBackground">@color/settings_bg</item>
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorControlNormal">@color/text_hint</item>
+        <item name="android:colorControlActivated">@color/accent</item>
+        <item name="android:colorControlHighlight">#33FFFFFF</item>
+        <item name="colorPrimary">@color/accent</item>
+        <item name="colorPrimaryVariant">@color/accent_pressed</item>
+        <item name="colorSecondary">@color/accent</item>
+        <item name="colorSecondaryVariant">@color/accent_pressed</item>
+        <item name="colorSurface">@color/settings_bg</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_hint</item>
+    </style>
+
+    <!--
+        Settings screen building blocks. These styles change presentation only:
+        layout, spacing, typography, colors and shape. No behaviour is touched.
+    -->
+    <style name="SettingsSectionLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">28dp</item>
+        <item name="android:layout_marginBottom">10dp</item>
+        <item name="android:textColor">@color/accent</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:letterSpacing">0.08</item>
+    </style>
+
+    <style name="SettingsFieldLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">14dp</item>
+        <item name="android:layout_marginBottom">8dp</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:letterSpacing">0.02</item>
+    </style>
+
+    <style name="SettingsInfoText">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/accent</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:lineSpacingExtra">2dp</item>
+        <item name="android:letterSpacing">0.02</item>
+    </style>
+
+    <style name="SettingsMutedText">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/text_hint</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:lineSpacingExtra">2dp</item>
+        <item name="android:letterSpacing">0.02</item>
+    </style>
+
+    <style name="SettingsStatusBox">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:padding">14dp</item>
+        <item name="android:background">@drawable/status_background</item>
+        <item name="android:textColor">@color/accent</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:lineSpacingExtra">3dp</item>
+        <item name="android:letterSpacing">0.02</item>
+    </style>
+
+    <!-- Delivery toggles: one row per setting, visually consistent with the
+         rest of the Settings screen (dark surface, rounded input background). -->
+    <style name="SettingsToggleRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">56dp</item>
+        <item name="android:layout_marginTop">14dp</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:background">@drawable/settings_input_bg</item>
+        <item name="android:paddingLeft">16dp</item>
+        <item name="android:paddingRight">8dp</item>
+    </style>
+
+    <style name="SettingsToggleLabel">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:letterSpacing">0.02</item>
+    </style>
+
+    <style name="SettingsToggle">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginEnd">12dp</item>
+    </style>
+
+    <style name="SettingsSpinner">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:paddingLeft">16dp</item>
+        <item name="android:paddingRight">48dp</item>
+        <item name="android:background">@drawable/settings_spinner_bg</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <style name="SettingsInput">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:paddingLeft">16dp</item>
+        <item name="android:paddingRight">16dp</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingBottom">12dp</item>
+        <item name="android:background">@drawable/settings_input_bg</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColorHint">@color/text_hint</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <style name="SettingsPrimaryButton" parent="Widget.MaterialComponents.Button">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">52dp</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.06</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="backgroundTint">@color/settings_btn_primary_bg</item>
+        <item name="android:textColor">@color/text_on_accent</item>
+        <item name="cornerRadius">12dp</item>
+        <item name="android:elevation">0dp</item>
+    </style>
+
+    <style name="SettingsSecondaryButton" parent="Widget.MaterialComponents.Button.OutlinedButton">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">52dp</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:letterSpacing">0.04</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="backgroundTint">@color/settings_btn_secondary_bg</item>
+        <item name="strokeColor">@color/settings_btn_secondary_stroke</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="android:textColor">@color/settings_btn_secondary_text</item>
+        <item name="cornerRadius">12dp</item>
+        <item name="android:elevation">0dp</item>
+    </style>
+
+</resources>

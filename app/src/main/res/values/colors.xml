@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="ic_launcher_background">#FF10151C</color>
+    <color name="status_background">#99000000</color>
+    <color name="overlay_card">#66000000</color>
+    <color name="accent">#FFFFC107</color>
+    <color name="control_fg">#E6FFFFFF</color>
+    <color name="zoom_track">#33FFFFFF</color>
+    <color name="zoom_progress">#FFFFC107</color>
+    <color name="size_track">#33FFFFFF</color>
+    <color name="size_progress">#FF4FC3F7</color>
+
+    <!-- Settings screen palette (visual polish only) -->
+    <color name="settings_bg">#FF10151C</color>
+    <color name="text_primary">#F2FFFFFF</color>
+    <color name="text_hint">#66FFFFFF</color>
+    <color name="divider">#26FFFFFF</color>
+    <color name="glass_fill">#1AFFFFFF</color>
+    <color name="glass_fill_strong">#2EFFFFFF</color>
+    <color name="glass_stroke">#33FFFFFF</color>
+    <color name="accent_pressed">#FFB300</color>
+    <color name="text_on_accent">#FF1A1400</color>
+</resources>

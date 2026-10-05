@@ -1,0 +1,330 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    UPPER SC OS3 overlay section. Shown as a REAL bounded TYPE_APPLICATION_OVERLAY
+    window pinned to the top of the screen while the underlying app stays visible
+    and usable everywhere around it.
+
+    Contains the existing upper controls exactly as approved:
+      - BLACK / SWITCH (left vertical panel)
+      - SIZE slider (left)
+      - camera preview panel (floating, draggable, zoom readout)
+      - ZOOM slider (right)
+      - SETTING / HELP (right vertical panel)
+      - status chip (top center)
+      - camera-permission card (in-band, replaces the old full-screen overlay)
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@android:color/transparent"
+    android:focusable="false"
+    android:clickable="false">
+
+    <!-- ============ Floating camera window (preview panel) ============ -->
+    <FrameLayout
+        android:id="@+id/floatingPanel"
+        android:layout_width="240dp"
+        android:layout_height="320dp"
+        android:layout_gravity="center"
+        android:background="@drawable/panel_background">
+
+        <androidx.camera.view.PreviewView
+            android:id="@+id/previewView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_margin="2dp"
+            app:implementationMode="compatible" />
+
+        <!-- BLACK mode: fully obscures the live preview surface. The camera
+             session keeps running underneath; controls stay usable. -->
+        <View
+            android:id="@+id/blackOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_margin="2dp"
+            android:background="#FF000000"
+            android:visibility="gone" />
+
+        <!-- Screen UI Mode card: shown when Screen UI mode is active -->
+        <LinearLayout
+            android:id="@+id/screenModeCard"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_margin="2dp"
+            android:background="#DD111111"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="8dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📱"
+                android:textSize="28sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Screen UI Mode"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:gravity="center"
+                android:text="Clean screenshot of mobile screen"
+                android:textColor="#AAAAAA"
+                android:textSize="8sp" />
+        </LinearLayout>
+
+        <!-- Compact translucent header / drag handle -->
+        <TextView
+            android:id="@+id/dragHandle"
+            android:layout_width="match_parent"
+            android:layout_height="18dp"
+            android:layout_gravity="top"
+            android:background="#66000000"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="@string/drag_hint"
+            android:textColor="#99FFFFFF"
+            android:textSize="8sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.08" />
+
+        <!-- Zoom readout (tappable: toggles wide/1.0x), floats over the preview -->
+        <TextView
+            android:id="@+id/zoomText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="22dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/status_chip"
+            android:paddingStart="5dp"
+            android:paddingEnd="5dp"
+            android:paddingTop="1dp"
+            android:paddingBottom="1dp"
+            android:text="1.0x"
+            android:textColor="@color/white"
+            android:textSize="10sp"
+            android:visibility="invisible" />
+    </FrameLayout>
+
+    <!-- ============ LEFT CONTROL GROUP: BLACK / SWITCH (connected vertical panel) ============ -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start|center_vertical"
+        android:layout_marginStart="10dp"
+        android:background="@drawable/segmented_panel"
+        android:orientation="vertical"
+        android:padding="1dp">
+
+        <Button
+            android:id="@+id/btnBlack"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="74dp"
+            android:layout_height="40dp"
+            android:background="@drawable/segmented_cell"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:padding="0dp"
+            android:text="@string/btn_black"
+            android:textColor="@color/white"
+            android:textSize="9sp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#33FFFFFF" />
+
+        <Button
+            android:id="@+id/btnSwitch"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="74dp"
+            android:layout_height="40dp"
+            android:background="@drawable/segmented_cell"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:padding="0dp"
+            android:text="@string/btn_switch"
+            android:textColor="@color/white"
+            android:textSize="9sp" />
+    </LinearLayout>
+
+    <!-- ============ Window size slider (LEFT edge, between buttons and preview) ============ -->
+    <FrameLayout
+        android:id="@+id/sizeSliderContainer"
+        android:layout_width="40dp"
+        android:layout_height="190dp"
+        android:layout_gravity="start|center_vertical"
+        android:layout_marginStart="94dp"
+        android:background="@drawable/slider_background">
+
+        <SeekBar
+            android:id="@+id/sizeSeekBar"
+            android:layout_width="190dp"
+            android:layout_height="40dp"
+            android:layout_gravity="center"
+            android:max="100"
+            android:maxHeight="4dp"
+            android:minHeight="4dp"
+            android:progress="22"
+            android:progressDrawable="@drawable/size_track"
+            android:rotation="-90"
+            android:thumb="@drawable/zoom_thumb" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="1dp"
+            android:background="@drawable/status_chip"
+            android:paddingStart="3dp"
+            android:paddingEnd="3dp"
+            android:text="@string/slider_size"
+            android:textColor="@color/white"
+            android:textSize="8sp" />
+    </FrameLayout>
+
+    <!-- ============ Zoom slider (RIGHT edge, between preview and buttons) ============ -->
+    <FrameLayout
+        android:id="@+id/zoomSliderContainer"
+        android:layout_width="40dp"
+        android:layout_height="190dp"
+        android:layout_gravity="end|center_vertical"
+        android:layout_marginEnd="94dp"
+        android:background="@drawable/slider_background">
+
+        <SeekBar
+            android:id="@+id/zoomSeekBar"
+            android:layout_width="190dp"
+            android:layout_height="40dp"
+            android:layout_gravity="center"
+            android:enabled="false"
+            android:max="100"
+            android:maxHeight="4dp"
+            android:minHeight="4dp"
+            android:progressDrawable="@drawable/zoom_track"
+            android:rotation="-90"
+            android:thumb="@drawable/zoom_thumb" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="1dp"
+            android:background="@drawable/status_chip"
+            android:paddingStart="3dp"
+            android:paddingEnd="3dp"
+            android:text="@string/slider_zoom"
+            android:textColor="@color/white"
+            android:textSize="8sp" />
+    </FrameLayout>
+
+    <!-- ============ RIGHT CONTROL GROUP: SETTING / HELP (connected vertical panel) ============ -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|center_vertical"
+        android:layout_marginEnd="10dp"
+        android:background="@drawable/segmented_panel"
+        android:orientation="vertical"
+        android:padding="1dp">
+
+        <Button
+            android:id="@+id/btnSetting"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="74dp"
+            android:layout_height="40dp"
+            android:background="@drawable/segmented_cell"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:padding="0dp"
+            android:text="@string/btn_setting"
+            android:textColor="@color/white"
+            android:textSize="9sp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#33FFFFFF" />
+
+        <Button
+            android:id="@+id/btnHelp"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="74dp"
+            android:layout_height="40dp"
+            android:background="@drawable/segmented_cell"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:padding="0dp"
+            android:text="@string/btn_help"
+            android:textColor="@color/white"
+            android:textSize="9sp" />
+    </LinearLayout>
+
+    <!-- ============ Status chip (top center) ============ -->
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/status_chip"
+        android:gravity="center"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:text="@string/status_ready"
+        android:textColor="@color/white"
+        android:textSize="10sp" />
+
+    <!-- ============ Camera-permission card (in-band) ============ -->
+    <LinearLayout
+        android:id="@+id/permissionCard"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#CC000000"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/permissionText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="@string/permission_required_message"
+            android:textColor="@color/white"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/permissionButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/permission_allow" />
+    </LinearLayout>
+
+</FrameLayout>
