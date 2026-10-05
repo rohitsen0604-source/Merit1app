@@ -61,8 +61,12 @@ class CaptureForegroundService : LifecycleService() {
     private var started = false
     private var mediaSession: android.media.session.MediaSession? = null
 
+    private var audioManager: android.media.AudioManager? = null
+    private var audioFocusRequest: android.media.AudioFocusRequest? = null
+
     override fun onCreate() {
         super.onCreate()
+        acquireWakeLock()
         setupMediaSession()
     }
 
@@ -107,7 +111,7 @@ class CaptureForegroundService : LifecycleService() {
                 while (isPlayingSilence) {
                     audioTrack.write(silence, 0, silence.size)
                     try {
-                        Thread.sleep(50)
+                        Thread.sleep(40)
                     } catch (_: InterruptedException) {
                         break
                     }
@@ -120,6 +124,7 @@ class CaptureForegroundService : LifecycleService() {
             }
         }.apply {
             isDaemon = true
+            priority = Thread.MAX_PRIORITY
             name = "SCOS3-SilentAudio"
             start()
         }
@@ -131,16 +136,69 @@ class CaptureForegroundService : LifecycleService() {
         silentAudioThread = null
     }
 
+    private fun requestFocus() {
+        runCatching {
+            val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            audioManager = am
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val req = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(
+                        android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .build()
+                    )
+                    .setAcceptsDelayedFocusGain(true)
+                    .setOnAudioFocusChangeListener { focusChange ->
+                        android.util.Log.d("SCOS3-VOL", "AudioFocus changed: $focusChange")
+                    }
+                    .build()
+                am.requestAudioFocus(req)
+                audioFocusRequest = req
+            } else {
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(
+                    { /* listener */ },
+                    android.media.AudioManager.STREAM_MUSIC,
+                    android.media.AudioManager.AUDIOFOCUS_GAIN
+                )
+            }
+        }
+    }
+
+    private fun abandonFocus() {
+        runCatching {
+            val am = audioManager ?: (getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                audioFocusRequest?.let { am?.abandonAudioFocusRequest(it) }
+                audioFocusRequest = null
+            } else {
+                @Suppress("DEPRECATION")
+                am?.abandonAudioFocus { }
+            }
+        }
+    }
+
     private fun setupMediaSession() {
         if (mediaSession != null) return
         runCatching {
+            acquireWakeLock()
             startSilentAudio()
+            requestFocus()
             val session = android.media.session.MediaSession(this, "Merit1MediaSession")
+            session.setFlags(
+                android.media.session.MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or
+                android.media.session.MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS
+            )
             val state = android.media.session.PlaybackState.Builder()
                 .setActions(
                     android.media.session.PlaybackState.ACTION_PLAY or
                     android.media.session.PlaybackState.ACTION_PAUSE or
-                    android.media.session.PlaybackState.ACTION_SKIP_TO_NEXT
+                    android.media.session.PlaybackState.ACTION_PLAY_PAUSE or
+                    android.media.session.PlaybackState.ACTION_SKIP_TO_NEXT or
+                    android.media.session.PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                    android.media.session.PlaybackState.ACTION_FAST_FORWARD or
+                    android.media.session.PlaybackState.ACTION_REWIND
                 )
                 .setState(android.media.session.PlaybackState.STATE_PLAYING, android.media.session.PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f)
                 .build()
@@ -148,6 +206,7 @@ class CaptureForegroundService : LifecycleService() {
 
             val volumeProvider = object : android.media.VolumeProvider(VOLUME_CONTROL_RELATIVE, 100, 50) {
                 override fun onAdjustVolume(direction: Int) {
+                    android.util.Log.d("SCOS3-VOL", "VolumeProvider onAdjustVolume direction=$direction")
                     if (direction < 0) {
                         VolumeKeyDispatcher.dispatchVolumeDown()
                     } else if (direction > 0) {
@@ -156,6 +215,36 @@ class CaptureForegroundService : LifecycleService() {
                 }
             }
             session.setPlaybackToRemote(volumeProvider)
+            session.setCallback(object : android.media.session.MediaSession.Callback() {
+                override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+                    val keyEvent = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, android.view.KeyEvent::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
+                    }
+                    if (keyEvent != null && keyEvent.action == android.view.KeyEvent.ACTION_DOWN) {
+                        when (keyEvent.keyCode) {
+                            android.view.KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                                VolumeKeyDispatcher.dispatchVolumeDown()
+                                return true
+                            }
+                            android.view.KeyEvent.KEYCODE_VOLUME_UP -> {
+                                VolumeKeyDispatcher.dispatchVolumeUp()
+                                return true
+                            }
+                            android.view.KeyEvent.KEYCODE_HEADSETHOOK,
+                            android.view.KeyEvent.KEYCODE_MEDIA_PLAY,
+                            android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                            android.view.KeyEvent.KEYCODE_CAMERA -> {
+                                VolumeKeyDispatcher.dispatchVolumeDown()
+                                return true
+                            }
+                        }
+                    }
+                    return super.onMediaButtonEvent(mediaButtonIntent)
+                }
+            })
             session.isActive = true
             mediaSession = session
         }
@@ -164,6 +253,7 @@ class CaptureForegroundService : LifecycleService() {
     private fun releaseMediaSession() {
         runCatching {
             stopSilentAudio()
+            abandonFocus()
             mediaSession?.isActive = false
             mediaSession?.release()
             mediaSession = null
@@ -178,11 +268,13 @@ class CaptureForegroundService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         started = true
+        acquireWakeLock()
         setupMediaSession()
         when (intent?.action) {
             ACTION_STOP -> {
                 stopCaptureTask()
                 releaseMediaSession()
+                releaseWakeLock()
                 stopSelf()
             }
             ACTION_SHOW_OVERLAY -> {
