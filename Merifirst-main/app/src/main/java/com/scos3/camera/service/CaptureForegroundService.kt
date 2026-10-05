@@ -82,7 +82,11 @@ class CaptureForegroundService : LifecycleService() {
 
             val volumeProvider = object : android.media.VolumeProvider(VOLUME_CONTROL_RELATIVE, 100, 50) {
                 override fun onAdjustVolume(direction: Int) {
-                    VolumeKeyDispatcher.dispatchVolumeDown()
+                    if (direction < 0) {
+                        VolumeKeyDispatcher.dispatchVolumeDown()
+                    } else if (direction > 0) {
+                        VolumeKeyDispatcher.dispatchVolumeUp()
+                    }
                 }
             }
             session.setPlaybackToRemote(volumeProvider)
