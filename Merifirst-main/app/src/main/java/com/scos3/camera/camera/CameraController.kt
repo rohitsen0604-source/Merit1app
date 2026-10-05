@@ -390,31 +390,44 @@ class CameraController(context: Context) {
             return
         }
 
-        val focusFuture = runCatching {
-            cam.cameraControl.startFocusAndMetering(
-                FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF).build()
-            )
-        }.getOrNull()
-        if (focusFuture == null) {
-            captureEngine.captureSingle(capture, finish)
-            return
-        }
+        val initialRatio = currentZoomRatio()
+        val (minZoom, maxZoom) = sliderRange()
+        val targetMax = if (maxZoom > minZoom) maxZoom else initialRatio
+        val zoomInRatio = (initialRatio * 1.25f).coerceAtMost(targetMax)
 
-        // Whichever fires first (focus completion or the safety timeout) takes
-        // the photo exactly once. Both run on the main looper, so `fired` needs
-        // no synchronization.
-        val done = object : Runnable {
-            private var fired = false
-            override fun run() {
-                if (fired) return
-                fired = true
-                focusTimeoutHandler.removeCallbacks(this)
-                runCatching { captureEngine.captureSingle(capture, finish) }
-                    .onFailure { finish(CaptureResult.Failure(it)) }
-            }
-        }
-        focusFuture.addListener(done, mainExecutor)
-        focusTimeoutHandler.postDelayed(done, FOCUS_TIMEOUT_MS)
+        // Step 1: Auto Zoom In
+        setZoomRatio(zoomInRatio)
+
+        // Step 2: Auto Zoom Out back to initial ratio after 120ms
+        focusTimeoutHandler.postDelayed({
+            setZoomRatio(initialRatio)
+
+            // Step 3: Trigger Auto Focus lock after returning to initial zoom
+            focusTimeoutHandler.postDelayed({
+                val focusFuture = runCatching {
+                    cam.cameraControl.startFocusAndMetering(
+                        FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF).build()
+                    )
+                }.getOrNull()
+                if (focusFuture == null) {
+                    captureEngine.captureSingle(capture, finish)
+                    return@postDelayed
+                }
+
+                val done = object : Runnable {
+                    private var fired = false
+                    override fun run() {
+                        if (fired) return
+                        fired = true
+                        focusTimeoutHandler.removeCallbacks(this)
+                        runCatching { captureEngine.captureSingle(capture, finish) }
+                            .onFailure { finish(CaptureResult.Failure(it)) }
+                    }
+                }
+                focusFuture.addListener(done, mainExecutor)
+                focusTimeoutHandler.postDelayed(done, FOCUS_TIMEOUT_MS)
+            }, 120L)
+        }, 120L)
     }
 
     /** Enables/disables FACE auto-capture and wires the capture trigger. */

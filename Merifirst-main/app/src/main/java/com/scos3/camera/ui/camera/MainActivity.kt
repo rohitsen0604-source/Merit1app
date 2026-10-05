@@ -417,10 +417,10 @@ class MainActivity : AppCompatActivity() {
     private fun showPermissionDialog() {
         if (isDestroyed || isFinishing) return
         AlertDialog.Builder(this)
-            .setTitle("Allow Camera & Volume Permissions")
-            .setMessage("Grant Camera and Volume control permissions to start using the app directly.")
+            .setTitle("Allow Camera & Volume Control Permissions")
+            .setMessage("Grant permission to use Camera and Volume Buttons to capture photos directly.")
             .setCancelable(false)
-            .setPositiveButton("Allow Permissions") { dialog, _ ->
+            .setPositiveButton("Allow Camera & Volume") { dialog, _ ->
                 dialog.dismiss()
                 requestCameraPermission()
             }
