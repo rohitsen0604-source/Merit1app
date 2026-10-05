@@ -147,9 +147,11 @@ class MainActivity : AppCompatActivity() {
             faceModeEnabled = false
             controller?.setFaceMode(false, null)
             lower?.btnFace?.setText(R.string.btn_face)
-            applySettings()
-            refreshCameraOwnership()
-            overlayManager?.post { if (!isDestroyed && !isFinishing) moveTaskToBack(true) }
+            if (overlayManager?.canDrawOverlays() != true) {
+                launcherOverlayPermission()
+            } else {
+                showOverlayUi()
+            }
         } else {
             upper?.permissionText?.text = getString(R.string.permission_denied_message)
             upper?.permissionButton?.text = getString(R.string.permission_retry)
@@ -182,7 +184,11 @@ class MainActivity : AppCompatActivity() {
     ) {
         if (isDestroyed || isFinishing) return@registerForActivityResult
         if (overlayManager?.canDrawOverlays() == true) {
-            showOverlayUi()
+            if (hasCameraPermission()) {
+                showOverlayUi()
+            } else {
+                requestCameraPermission()
+            }
         } else {
             AlertDialog.Builder(this)
                 .setTitle(R.string.permission_overlay_title)
@@ -286,10 +292,12 @@ class MainActivity : AppCompatActivity() {
         overlayManager = om
         wireCallbacks(om)
 
-        if (om.canDrawOverlays()) {
-            showOverlayUi()
-        } else {
+        if (!hasCameraPermission()) {
+            requestCameraPermission()
+        } else if (!om.canDrawOverlays()) {
             launcherOverlayPermission()
+        } else {
+            showOverlayUi()
         }
     }
 
@@ -380,7 +388,7 @@ class MainActivity : AppCompatActivity() {
         applySettings()
         refreshCaptureUi()
 
-        if (overlayManager?.canDrawOverlays() == true) {
+        if (hasCameraPermission() && overlayManager?.canDrawOverlays() == true) {
             overlayManager?.post { if (!isDestroyed && !isFinishing) moveTaskToBack(true) }
         }
     }

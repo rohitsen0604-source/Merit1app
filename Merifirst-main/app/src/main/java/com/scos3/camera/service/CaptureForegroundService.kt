@@ -199,11 +199,16 @@ class CaptureForegroundService : LifecycleService() {
         )
         if (hasCameraPermission()) {
             try {
+                val fgsType = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                } else {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                }
                 ServiceCompat.startForeground(
                     this,
                     NOTIFICATION_ID,
                     notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA,
+                    fgsType,
                 )
                 foregroundStarted = true
                 return true
