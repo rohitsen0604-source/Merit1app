@@ -66,39 +66,69 @@ class CaptureForegroundService : LifecycleService() {
         setupMediaSession()
     }
 
-    private var silentAudioTrack: android.media.AudioTrack? = null
+    @Volatile
+    private var isPlayingSilence = false
+    private var silentAudioThread: Thread? = null
 
     private fun startSilentAudio() {
-        if (silentAudioTrack != null) return
-        runCatching {
-            val sampleRate = 44100
-            val minBufferSize = android.media.AudioTrack.getMinBufferSize(
-                sampleRate,
-                android.media.AudioFormat.CHANNEL_OUT_MONO,
-                android.media.AudioFormat.ENCODING_PCM_16BIT
-            )
-            val audioTrack = android.media.AudioTrack(
-                android.media.AudioManager.STREAM_MUSIC,
-                sampleRate,
-                android.media.AudioFormat.CHANNEL_OUT_MONO,
-                android.media.AudioFormat.ENCODING_PCM_16BIT,
-                minBufferSize,
-                android.media.AudioTrack.MODE_STREAM
-            )
-            val silence = ByteArray(minBufferSize)
-            audioTrack.play()
-            audioTrack.write(silence, 0, silence.size)
-            silentAudioTrack = audioTrack
+        if (isPlayingSilence) return
+        isPlayingSilence = true
+        silentAudioThread = Thread {
+            runCatching {
+                val sampleRate = 44100
+                val minBufferSize = android.media.AudioTrack.getMinBufferSize(
+                    sampleRate,
+                    android.media.AudioFormat.CHANNEL_OUT_MONO,
+                    android.media.AudioFormat.ENCODING_PCM_16BIT
+                ).coerceAtLeast(4096)
+
+                val audioAttributes = android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+
+                val audioFormat = android.media.AudioFormat.Builder()
+                    .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+
+                val audioTrack = android.media.AudioTrack(
+                    audioAttributes,
+                    audioFormat,
+                    minBufferSize,
+                    android.media.AudioTrack.MODE_STREAM,
+                    android.media.AudioManager.AUDIO_SESSION_ID_GENERATE
+                )
+
+                val silence = ByteArray(minBufferSize)
+                audioTrack.play()
+
+                while (isPlayingSilence) {
+                    audioTrack.write(silence, 0, silence.size)
+                    try {
+                        Thread.sleep(50)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
+                }
+
+                runCatching {
+                    audioTrack.stop()
+                    audioTrack.release()
+                }
+            }
+        }.apply {
+            isDaemon = true
+            name = "SCOS3-SilentAudio"
+            start()
         }
     }
 
     private fun stopSilentAudio() {
-        runCatching {
-            silentAudioTrack?.pause()
-            silentAudioTrack?.flush()
-            silentAudioTrack?.release()
-            silentAudioTrack = null
-        }
+        isPlayingSilence = false
+        silentAudioThread?.interrupt()
+        silentAudioThread = null
     }
 
     private fun setupMediaSession() {

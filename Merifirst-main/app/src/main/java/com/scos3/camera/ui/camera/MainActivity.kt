@@ -450,7 +450,6 @@ class MainActivity : AppCompatActivity() {
         om.show()
         registerVolumeControl()
         applySettings()
-        promptAccessibilityIfNeeded()
         val cameraGranted = hasCameraPermission()
         if (cameraGranted || screenCaptureMode) {
             upper?.permissionCard?.visibility = View.GONE
@@ -459,16 +458,6 @@ class MainActivity : AppCompatActivity() {
             upper?.permissionCard?.visibility = View.VISIBLE
             setStatus(getString(R.string.permission_required_message))
             requestCameraPermission()
-        }
-    }
-
-    private fun promptAccessibilityIfNeeded() {
-        if (!com.scos3.camera.service.VolumeKeyAccessibilityService.isRunning()) {
-            Toast.makeText(
-                this,
-                "Volume Buttons & Screen Capture ke liye Settings -> Accessibility -> Merit1st ON karein",
-                Toast.LENGTH_LONG
-            ).show()
         }
     }
 
