@@ -84,7 +84,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun refreshVolumeStatus() {
-        binding.volumeStatusText.text = "Volume Control: Active (via Hardware Volume Keys)"
+        binding.volumeStatusText.text = "Volume Control: Active (Hardware Volume Keys)"
         binding.volumeStatusText.setTextColor(getColor(R.color.accent))
         binding.volumeOpenSettingsButton.visibility = View.GONE
     }

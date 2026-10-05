@@ -149,6 +149,8 @@ class MainActivity : AppCompatActivity() {
             lower?.btnFace?.setText(R.string.btn_face)
             if (overlayManager?.canDrawOverlays() != true) {
                 launcherOverlayPermission()
+            } else if (!hasMediaProjection()) {
+                ensureScreenCapturePermission()
             } else {
                 showOverlayUi()
             }
@@ -184,10 +186,12 @@ class MainActivity : AppCompatActivity() {
     ) {
         if (isDestroyed || isFinishing) return@registerForActivityResult
         if (overlayManager?.canDrawOverlays() == true) {
-            if (hasCameraPermission()) {
-                showOverlayUi()
-            } else {
+            if (!hasCameraPermission()) {
                 requestCameraPermission()
+            } else if (!hasMediaProjection()) {
+                ensureScreenCapturePermission()
+            } else {
+                showOverlayUi()
             }
         } else {
             AlertDialog.Builder(this)
@@ -216,46 +220,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private var mediaProjection: android.media.projection.MediaProjection? = null
-    private var screenVirtualDisplay: android.hardware.display.VirtualDisplay? = null
-    private var screenImageReader: android.media.ImageReader? = null
     private var pendingScreenCaptureResult: ((CaptureResult) -> Unit)? = null
+    private var screenCaptureRequestedOnce = false
+    private var pendingMediaProjectionData: Pair<Int, Intent>? = null
 
-    private fun setupMediaProjectionSession(proj: android.media.projection.MediaProjection?) {
-        mediaProjection = proj
-        if (proj == null) return
-        runCatching {
-            screenVirtualDisplay?.release()
-            screenImageReader?.close()
-        }
-        val metrics = resources.displayMetrics
-        val width = metrics.widthPixels
-        val height = metrics.heightPixels
-        val density = metrics.densityDpi
-
-        val imageReader = android.media.ImageReader.newInstance(width, height, android.graphics.PixelFormat.RGBA_8888, 2)
-        screenImageReader = imageReader
-
-        screenVirtualDisplay = proj.createVirtualDisplay(
-            "ScreenCapture",
-            width, height, density,
-            android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader.surface,
-            null, null
-        )
-    }
+    private fun hasMediaProjection(): Boolean = service?.hasMediaProjection() == true
 
     private fun ensureScreenCapturePermission() {
-        if (mediaProjection == null) {
-            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                projectionManager.createScreenCaptureIntent(
-                    android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay()
-                )
-            } else {
-                projectionManager.createScreenCaptureIntent()
+        if (!hasMediaProjection()) {
+            screenCaptureRequestedOnce = true
+            runCatching {
+                val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+                val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    projectionManager.createScreenCaptureIntent(
+                        android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay()
+                    )
+                } else {
+                    projectionManager.createScreenCaptureIntent()
+                }
+                screenCapturePermissionLauncher.launch(intent)
+            }.onFailure {
+                android.util.Log.e("SCOS3", "Failed to launch screenCapture intent", it)
             }
-            screenCapturePermissionLauncher.launch(intent)
         }
     }
 
@@ -263,19 +249,35 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
-            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-            val proj = projectionManager.getMediaProjection(result.resultCode, result.data!!)
-            setupMediaProjectionSession(proj)
-            val cb = pendingScreenCaptureResult
-            pendingScreenCaptureResult = null
-            if (cb != null) {
-                captureScreenWithProjection(cb)
+            val bound = service
+            if (bound != null) {
+                bound.updateForegroundServiceTypeForMediaProjection()
+                try {
+                    val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+                    val proj = projectionManager.getMediaProjection(result.resultCode, result.data!!)
+                    if (proj != null) {
+                        bound.setMediaProjection(proj, resources.displayMetrics)
+                    }
+                    val cb = pendingScreenCaptureResult
+                    pendingScreenCaptureResult = null
+                    if (cb != null) {
+                        captureScreenUi(cb)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("SCOS3", "Failed to get MediaProjection", e)
+                    val cb = pendingScreenCaptureResult
+                    pendingScreenCaptureResult = null
+                    cb?.invoke(CaptureResult.Failure(e))
+                }
+            } else {
+                pendingMediaProjectionData = Pair(result.resultCode, result.data!!)
             }
         } else {
             val cb = pendingScreenCaptureResult
             pendingScreenCaptureResult = null
             cb?.invoke(CaptureResult.Failure(IllegalStateException("Screen capture permission denied")))
         }
+        showOverlayUi()
     }
 
     private val serviceConnection = object : ServiceConnection {
@@ -285,6 +287,27 @@ class MainActivity : AppCompatActivity() {
             service = bound
             serviceBound = true
             serviceStateKnown = true
+            val pendingData = pendingMediaProjectionData
+            if (pendingData != null) {
+                pendingMediaProjectionData = null
+                bound.updateForegroundServiceTypeForMediaProjection()
+                runCatching {
+                    val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+                    val proj = projectionManager.getMediaProjection(pendingData.first, pendingData.second)
+                    if (proj != null) {
+                        bound.setMediaProjection(proj, resources.displayMetrics)
+                        val cb = pendingScreenCaptureResult
+                        pendingScreenCaptureResult = null
+                        if (cb != null) {
+                            captureScreenUi(cb)
+                        }
+                    }
+                }.onFailure {
+                    android.util.Log.e("SCOS3", "Failed to set pending MediaProjection", it)
+                }
+            } else if (bound.hasMediaProjection()) {
+                bound.updateForegroundServiceTypeForMediaProjection()
+            }
             if (isDestroyed || isFinishing) return
             bound.addListener(statusListener)
             capturing = bound.isCapturing()
@@ -337,6 +360,8 @@ class MainActivity : AppCompatActivity() {
             requestCameraPermission()
         } else if (!om.canDrawOverlays()) {
             launcherOverlayPermission()
+        } else if (!hasMediaProjection()) {
+            ensureScreenCapturePermission()
         } else {
             showOverlayUi()
         }
@@ -464,14 +489,6 @@ class MainActivity : AppCompatActivity() {
         controller?.release()
         controller = null
         overlayManager?.hide()
-        runCatching {
-            screenVirtualDisplay?.release()
-            screenVirtualDisplay = null
-            screenImageReader?.close()
-            screenImageReader = null
-            mediaProjection?.stop()
-            mediaProjection = null
-        }
         super.onDestroy()
     }
 
@@ -496,6 +513,10 @@ class MainActivity : AppCompatActivity() {
         if (isDestroyed || isFinishing) return
         val om = overlayManager ?: return
         if (!om.canDrawOverlays()) return
+        if (!hasMediaProjection() && !screenCaptureRequestedOnce) {
+            ensureScreenCapturePermission()
+            return
+        }
         om.show()
         registerVolumeControl()
         applySettings()
@@ -615,7 +636,9 @@ class MainActivity : AppCompatActivity() {
         val settings = settingsRepo?.load() ?: return
         if (settings.defaultLens == CameraControllerLens.SCREEN) {
             setScreenMode(true)
-            ensureScreenCapturePermission()
+            if (!hasMediaProjection()) {
+                ensureScreenCapturePermission()
+            }
         } else {
             setScreenMode(false)
             val target = if (settings.defaultLens == CameraControllerLens.FRONT) Lens.FRONT else Lens.BACK
@@ -684,10 +707,7 @@ class MainActivity : AppCompatActivity() {
     private fun refreshCameraOwnership() {
         if (!hasCameraPermission()) return
         if (overlayManager?.isShowing() != true) return
-        if (capturing) {
-            controller?.release()
-            controller = null
-        } else {
+        if (controller == null && !capturing) {
             applySettings()
         }
     }
@@ -714,12 +734,14 @@ class MainActivity : AppCompatActivity() {
             // FRONT -> SCREEN
             setScreenMode(true)
             Toast.makeText(this, "📱 Screen UI Screenshot Mode", Toast.LENGTH_SHORT).show()
-            ensureScreenCapturePermission()
+            if (!hasMediaProjection()) {
+                ensureScreenCapturePermission()
+            }
         }
     }
 
     private fun onCapturePressed() {
-        captureSingle(autofocus = false)
+        captureSingle(autofocus = true)
     }
 
     private fun captureScreenUi(onResult: (CaptureResult) -> Unit) {
@@ -734,124 +756,31 @@ class MainActivity : AppCompatActivity() {
                     if (bitmap != null) {
                         captureEngine?.captureBitmap(bitmap, onResult)
                     } else {
-                        onResult(CaptureResult.Failure(IllegalStateException("Accessibility screenshot failed")))
+                        onResult(CaptureResult.Failure(IllegalStateException("Screenshot failed")))
                     }
                 }
             }, 150L)
             return
         }
 
-        val proj = mediaProjection
-        if (proj == null) {
-            pendingScreenCaptureResult = onResult
-            ensureScreenCapturePermission()
-        } else {
-            captureScreenWithProjection(onResult)
-        }
-    }
-
-    private fun captureScreenWithProjection(onResult: (CaptureResult) -> Unit) {
-        val proj = mediaProjection
-        if (proj == null) {
-            onResult(CaptureResult.Failure(IllegalStateException("Screen capture permission required")))
-            return
-        }
-        if (screenVirtualDisplay == null || screenImageReader == null) {
-            setupMediaProjectionSession(proj)
-        }
-
-        val imageReader = screenImageReader
-        if (imageReader == null) {
-            onResult(CaptureResult.Failure(IllegalStateException("Screen reader unavailable")))
-            return
-        }
-
-        // Temporarily hide overlay windows so they are NOT in the screenshot
-        overlayManager?.hide()
-
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            try {
-                val image = imageReader.acquireLatestImage()
-                if (image != null) {
-                    try {
-                        val metrics = resources.displayMetrics
-                        val width = metrics.widthPixels
-                        val height = metrics.heightPixels
-                        val planes = image.planes
-                        val buffer = planes[0].buffer
-                        val pixelStride = planes[0].pixelStride
-                        val rowStride = planes[0].rowStride
-                        val rowPadding = rowStride - pixelStride * width
-
-                        val bitmap = Bitmap.createBitmap(
-                            width + rowPadding / pixelStride,
-                            height,
-                            Bitmap.Config.ARGB_8888
-                        )
-                        bitmap.copyPixelsFromBuffer(buffer)
-
-                        val croppedBitmap = if (rowPadding > 0) {
-                            Bitmap.createBitmap(bitmap, 0, 0, width, height)
-                        } else {
-                            bitmap
-                        }
-
-                        overlayManager?.show()
-                        captureEngine?.captureBitmap(croppedBitmap, onResult)
-                    } finally {
-                        image.close()
+        val s = service
+        if (s != null && s.hasMediaProjection()) {
+            overlayManager?.hide()
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                s.captureScreen { bitmap ->
+                    overlayManager?.show()
+                    if (bitmap != null) {
+                        captureEngine?.captureBitmap(bitmap, onResult)
+                    } else {
+                        onResult(CaptureResult.Failure(IllegalStateException("Screen capture failed")))
                     }
-                } else {
-                    var handled = false
-                    imageReader.setOnImageAvailableListener({ reader ->
-                        if (handled) return@setOnImageAvailableListener
-                        val nextImage = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                        handled = true
-                        imageReader.setOnImageAvailableListener(null, null)
-                        try {
-                            val metrics = resources.displayMetrics
-                            val width = metrics.widthPixels
-                            val height = metrics.heightPixels
-                            val planes = nextImage.planes
-                            val buffer = planes[0].buffer
-                            val pixelStride = planes[0].pixelStride
-                            val rowStride = planes[0].rowStride
-                            val rowPadding = rowStride - pixelStride * width
-
-                            val bitmap = Bitmap.createBitmap(
-                                width + rowPadding / pixelStride,
-                                height,
-                                Bitmap.Config.ARGB_8888
-                            )
-                            bitmap.copyPixelsFromBuffer(buffer)
-
-                            val croppedBitmap = if (rowPadding > 0) {
-                                Bitmap.createBitmap(bitmap, 0, 0, width, height)
-                            } else {
-                                bitmap
-                            }
-
-                            overlayManager?.show()
-                            captureEngine?.captureBitmap(croppedBitmap, onResult)
-                        } finally {
-                            nextImage.close()
-                        }
-                    }, android.os.Handler(android.os.Looper.getMainLooper()))
-
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        if (!handled) {
-                            handled = true
-                            imageReader.setOnImageAvailableListener(null, null)
-                            overlayManager?.show()
-                            onResult(CaptureResult.Failure(IllegalStateException("Screen capture timeout")))
-                        }
-                    }, 1500L)
                 }
-            } catch (e: Exception) {
-                overlayManager?.show()
-                onResult(CaptureResult.Failure(e))
-            }
-        }, 150L)
+            }, 150L)
+            return
+        }
+
+        pendingScreenCaptureResult = onResult
+        ensureScreenCapturePermission()
     }
 
     private fun captureSingle(autofocus: Boolean = true) {
@@ -1014,6 +943,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleAutoCapture() {
+        if (screenCaptureMode) {
+            Toast.makeText(this, "Auto capture is available in Camera mode", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (!hasCameraPermission()) {
             runWithOverlayHidden { requestCameraPermission() }
             return
@@ -1023,7 +956,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (capturing) {
-            CaptureForegroundService.stopCapture(this)
+            stopAutoCapture()
             return
         }
         val needsPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -1032,12 +965,7 @@ class MainActivity : AppCompatActivity() {
         if (needsPermission) {
             runWithOverlayHidden { maybeRequestNotificationsAndStartAuto() }
         } else {
-            runWhenResumed {
-                maybeRequestNotificationsAndStartAuto()
-                if (pendingAutoStart == null) {
-                    overlayManager?.post { if (!isDestroyed && !isFinishing) moveTaskToBack(true) }
-                }
-            }
+            maybeRequestNotificationsAndStartAuto()
         }
     }
 
@@ -1073,18 +1001,38 @@ class MainActivity : AppCompatActivity() {
         lastAutoUltrawide = request.ultrawide
         lastAutoZoom = request.zoom
         setStatus(getString(R.string.status_capture_starting))
-        val started = CaptureForegroundService.startCapture(
-            this,
-            request.intervalMs,
-            request.lens,
-            request.ultrawide,
-            request.zoom,
-        )
-        if (!started) {
-            // The system refused the camera FGS start (missing permission or a
-            // background-state race). Stay open and report instead of crashing.
-            setStatus(getString(R.string.error_capture_start))
+
+        CaptureForegroundService.showOverlay(this)
+
+        val instance = controller
+        if (instance == null) {
+            setStatus(getString(R.string.error_capture, "Camera not ready"))
+            return
         }
+
+        capturing = true
+        refreshCaptureUi()
+
+        var count = 0
+        instance.startIntervalCapture(request.intervalMs) { result ->
+            when (result) {
+                is CaptureResult.Success -> {
+                    count++
+                    setStatus(getString(R.string.status_capture_active, request.intervalMs / 1000L, count))
+                    service?.updateCaptureNotification(request.intervalMs, count)
+                }
+                is CaptureResult.Failure -> {
+                    Log.e("SCOS3", "Interval capture failed: ${result.error.message}")
+                }
+            }
+        }
+    }
+
+    private fun stopAutoCapture() {
+        controller?.stopIntervalCapture()
+        capturing = false
+        refreshCaptureUi()
+        service?.updateCaptureNotification(0L, 0)
     }
 
     private fun refreshCaptureUi() {
@@ -1093,14 +1041,14 @@ class MainActivity : AppCompatActivity() {
         if (capturing) {
             lower?.btnAuto?.setText(R.string.stop_auto_capture)
             upper?.btnSwitch?.isEnabled = false
-            upper?.sizeSeekBar?.isEnabled = false
-            upper?.zoomSeekBar?.isEnabled = false
+            upper?.sizeSeekBar?.isEnabled = true
+            upper?.zoomSeekBar?.isEnabled = true
             lower?.btnCapture?.isEnabled = false
             lower?.btnFace?.isEnabled = false
             setStatus(
                 getString(
                     R.string.status_capture_active,
-                    (service?.currentIntervalMs() ?: selectedIntervalMs()) / 1000L,
+                    selectedIntervalMs() / 1000L,
                     service?.captureCount() ?: 0,
                 )
             )

@@ -60,6 +60,9 @@ class CaptureForegroundService : LifecycleService() {
     private var minimized = false
     private var started = false
     private var mediaSession: android.media.session.MediaSession? = null
+    private var mediaProjection: android.media.projection.MediaProjection? = null
+    private var screenVirtualDisplay: android.hardware.display.VirtualDisplay? = null
+    private var screenImageReader: android.media.ImageReader? = null
 
     private var audioManager: android.media.AudioManager? = null
     private var audioFocusRequest: android.media.AudioFocusRequest? = null
@@ -207,6 +210,10 @@ class CaptureForegroundService : LifecycleService() {
             val volumeProvider = object : android.media.VolumeProvider(VOLUME_CONTROL_RELATIVE, 100, 50) {
                 override fun onAdjustVolume(direction: Int) {
                     android.util.Log.d("SCOS3-VOL", "VolumeProvider onAdjustVolume direction=$direction")
+                    runCatching {
+                        @Suppress("DEPRECATION")
+                        sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
+                    }
                     if (direction < 0) {
                         VolumeKeyDispatcher.dispatchVolumeDown()
                     } else if (direction > 0) {
@@ -358,7 +365,7 @@ class CaptureForegroundService : LifecycleService() {
         )
         if (hasCameraPermission()) {
             try {
-                val fgsType = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val fgsType = if (mediaProjection != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
                 } else {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
@@ -381,6 +388,159 @@ class CaptureForegroundService : LifecycleService() {
         }.onSuccess {
             foregroundStarted = true
         }.isSuccess
+    }
+
+    fun updateForegroundServiceTypeForMediaProjection() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            runCatching {
+                val notification = buildNotification(
+                    getString(R.string.notif_title),
+                    getString(R.string.notif_starting),
+                    getString(R.string.notif_auto_active),
+                )
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
+                )
+            }.onFailure {
+                android.util.Log.e("SCOS3", "Failed to update FGS type to mediaProjection", it)
+            }
+        }
+    }
+
+    fun setMediaProjection(proj: android.media.projection.MediaProjection, metrics: android.util.DisplayMetrics) {
+        mediaProjection?.stop()
+        runCatching {
+            screenVirtualDisplay?.release()
+            screenImageReader?.close()
+        }
+        mediaProjection = proj
+        updateForegroundServiceTypeForMediaProjection()
+
+        runCatching {
+            val width = metrics.widthPixels
+            val height = metrics.heightPixels
+            val density = metrics.densityDpi
+
+            val imageReader = android.media.ImageReader.newInstance(width, height, android.graphics.PixelFormat.RGBA_8888, 2)
+            screenImageReader = imageReader
+
+            proj.registerCallback(object : android.media.projection.MediaProjection.Callback() {
+                override fun onStop() {
+                    runCatching {
+                        screenVirtualDisplay?.release()
+                        screenVirtualDisplay = null
+                        screenImageReader?.close()
+                        screenImageReader = null
+                    }
+                    mediaProjection = null
+                }
+            }, android.os.Handler(android.os.Looper.getMainLooper()))
+
+            screenVirtualDisplay = proj.createVirtualDisplay(
+                "ScreenCapture",
+                width, height, density,
+                android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.surface,
+                null, null
+            )
+        }.onFailure {
+            android.util.Log.e("SCOS3", "Failed to setup VirtualDisplay for MediaProjection", it)
+        }
+    }
+
+    fun hasMediaProjection(): Boolean = mediaProjection != null && screenImageReader != null
+
+    fun captureScreen(onBitmap: (android.graphics.Bitmap?) -> Unit) {
+        val imageReader = screenImageReader
+        if (imageReader == null) {
+            onBitmap(null)
+            return
+        }
+
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        handler.postDelayed({
+            try {
+                val image = imageReader.acquireLatestImage()
+                if (image != null) {
+                    try {
+                        val width = image.width
+                        val height = image.height
+                        val planes = image.planes
+                        val buffer = planes[0].buffer
+                        val pixelStride = planes[0].pixelStride
+                        val rowStride = planes[0].rowStride
+                        val rowPadding = rowStride - pixelStride * width
+
+                        val bitmap = android.graphics.Bitmap.createBitmap(
+                            width + rowPadding / pixelStride,
+                            height,
+                            android.graphics.Bitmap.Config.ARGB_8888
+                        )
+                        bitmap.copyPixelsFromBuffer(buffer)
+
+                        val croppedBitmap = if (rowPadding > 0) {
+                            val cropped = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, width, height)
+                            bitmap.recycle()
+                            cropped
+                        } else {
+                            bitmap
+                        }
+                        onBitmap(croppedBitmap)
+                    } finally {
+                        image.close()
+                    }
+                } else {
+                    var handled = false
+                    imageReader.setOnImageAvailableListener({ reader ->
+                        if (handled) return@setOnImageAvailableListener
+                        val nextImage = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                        handled = true
+                        imageReader.setOnImageAvailableListener(null, null)
+                        try {
+                            val width = nextImage.width
+                            val height = nextImage.height
+                            val planes = nextImage.planes
+                            val buffer = planes[0].buffer
+                            val pixelStride = planes[0].pixelStride
+                            val rowStride = planes[0].rowStride
+                            val rowPadding = rowStride - pixelStride * width
+
+                            val bitmap = android.graphics.Bitmap.createBitmap(
+                                width + rowPadding / pixelStride,
+                                height,
+                                android.graphics.Bitmap.Config.ARGB_8888
+                            )
+                            bitmap.copyPixelsFromBuffer(buffer)
+
+                            val croppedBitmap = if (rowPadding > 0) {
+                                val cropped = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, width, height)
+                                bitmap.recycle()
+                                cropped
+                            } else {
+                                bitmap
+                            }
+                            onBitmap(croppedBitmap)
+                        } finally {
+                            nextImage.close()
+                        }
+                    }, handler)
+
+                    handler.postDelayed({
+                        if (!handled) {
+                            handled = true
+                            imageReader.setOnImageAvailableListener(null, null)
+                            onBitmap(null)
+                        }
+                    }, 1200L)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("SCOS3", "captureScreen error", e)
+                onBitmap(null)
+            }
+        }, 120L)
     }
 
     private fun hasCameraPermission(): Boolean =
@@ -477,6 +637,28 @@ class CaptureForegroundService : LifecycleService() {
         )
     }
 
+    fun updateCaptureNotification(intervalMs: Long, count: Int) {
+        if (intervalMs > 0L) {
+            activeIntervalMs = intervalMs
+            captureCount = count
+            updateNotification(intervalMs, count)
+            notifyUi(intervalMs, count, true)
+        } else {
+            activeIntervalMs = 0L
+            captureCount = 0
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.notify(
+                NOTIFICATION_ID,
+                buildNotification(
+                    getString(R.string.notif_title),
+                    getString(R.string.notif_minimized),
+                    getString(R.string.notif_minimized_sub),
+                ),
+            )
+            notifyUi(0L, 0, false)
+        }
+    }
+
     private fun intervalSecondsLabel(intervalMs: Long): String =
         (intervalMs / 1000L).toString()
 
@@ -544,6 +726,14 @@ class CaptureForegroundService : LifecycleService() {
     override fun onDestroy() {
         stopCaptureTask()
         releaseMediaSession()
+        runCatching {
+            screenVirtualDisplay?.release()
+            screenVirtualDisplay = null
+            screenImageReader?.close()
+            screenImageReader = null
+            mediaProjection?.stop()
+            mediaProjection = null
+        }
         super.onDestroy()
     }
 
