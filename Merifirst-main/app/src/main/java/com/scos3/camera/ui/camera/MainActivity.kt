@@ -33,7 +33,6 @@ import com.scos3.camera.email.EmailManagerProvider
 import com.scos3.camera.settings.AppSettings.CameraControllerLens
 import com.scos3.camera.settings.SettingsRepository
 import com.scos3.camera.service.CaptureForegroundService
-import com.scos3.camera.service.VolumeKeyAccessibilityService
 import com.scos3.camera.service.VolumeKeyDispatcher
 import com.scos3.camera.ui.diagnostics.DiagnosticsActivity
 import com.scos3.camera.ui.settings.SettingsActivity
@@ -401,6 +400,19 @@ class MainActivity : AppCompatActivity() {
         cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
+    private fun showPermissionDialog() {
+        if (isDestroyed || isFinishing) return
+        AlertDialog.Builder(this)
+            .setTitle("Allow Camera & Volume Permissions")
+            .setMessage("Grant Camera and Volume control permissions to start using the app directly.")
+            .setCancelable(false)
+            .setPositiveButton("Allow Permissions") { dialog, _ ->
+                dialog.dismiss()
+                requestCameraPermission()
+            }
+            .show()
+    }
+
     // ======================== Overlay lifecycle ========================
 
     /** Adds both overlay sections and hides the Activity window behind the current app. */
@@ -418,7 +430,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             upper?.permissionCard?.visibility = View.VISIBLE
             setStatus(getString(R.string.permission_required_message))
-            requestCameraPermission()
+            showPermissionDialog()
         }
     }
 
@@ -633,27 +645,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun captureScreenUi(onResult: (CaptureResult) -> Unit) {
-        val a11yService = VolumeKeyAccessibilityService.instance
-        if (a11yService == null) {
-            Toast.makeText(this, "Enable Merit1st in Accessibility Settings to capture screen", Toast.LENGTH_LONG).show()
-            runWithOverlayHidden {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
-            onResult(CaptureResult.Failure(IllegalStateException("Accessibility service not enabled")))
+        val window = window ?: run {
+            onResult(CaptureResult.Failure(IllegalStateException("Window unavailable")))
             return
         }
-        // Temporarily hide overlay windows so the app's UI is not in the screenshot
-        overlayManager?.hide()
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            a11yService.takeScreenCapture { bitmap ->
-                overlayManager?.show()
-                if (bitmap != null) {
-                    captureEngine?.captureBitmap(bitmap, onResult)
-                } else {
-                    onResult(CaptureResult.Failure(IllegalStateException("Screen capture failed")))
-                }
-            }
-        }, 150L)
+        val width = window.decorView.width.coerceAtLeast(1)
+        val height = window.decorView.height.coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            android.view.PixelCopy.request(
+                window,
+                bitmap,
+                { copyResult ->
+                    if (copyResult == android.view.PixelCopy.SUCCESS) {
+                        captureEngine?.captureBitmap(bitmap, onResult)
+                    } else {
+                        onResult(CaptureResult.Failure(IllegalStateException("Screen capture failed")))
+                    }
+                },
+                android.os.Handler(android.os.Looper.getMainLooper())
+            )
+        } else {
+            val canvas = android.graphics.Canvas(bitmap)
+            window.decorView.draw(canvas)
+            captureEngine?.captureBitmap(bitmap, onResult)
+        }
     }
 
     private fun captureSingle(autofocus: Boolean = false) {

@@ -22,7 +22,6 @@ import com.scos3.camera.settings.AppSettings.CameraResolution
 import com.scos3.camera.settings.AppSettings.GmailSettings
 import com.scos3.camera.settings.AppSettings.JpegQuality
 import com.scos3.camera.settings.SettingsRepository
-import com.scos3.camera.service.VolumeKeyAccessibilityService
 import com.scos3.camera.ui.diagnostics.DiagnosticsActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -85,14 +84,9 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun refreshVolumeStatus() {
-        val enabled = VolumeKeyAccessibilityService.isEnabled(this)
-        binding.volumeStatusText.text = getString(
-            if (enabled) R.string.settings_volume_status_enabled
-            else R.string.settings_volume_status_disabled
-        )
-        binding.volumeStatusText.setTextColor(
-            getColor(if (enabled) R.color.accent else R.color.white)
-        )
+        binding.volumeStatusText.text = "Volume Control: Active (via Volume Keys)"
+        binding.volumeStatusText.setTextColor(getColor(R.color.accent))
+        binding.volumeOpenSettingsButton.visibility = View.GONE
     }
 
     private fun populateUi() {
