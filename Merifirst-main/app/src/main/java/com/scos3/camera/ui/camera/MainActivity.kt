@@ -226,6 +226,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun hasMediaProjection(): Boolean = service?.hasMediaProjection() == true
 
+    private fun getRealScreenMetrics(): Triple<Int, Int, Int> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bounds = windowManager.currentWindowMetrics.bounds
+            val density = resources.configuration.densityDpi
+            Triple(bounds.width(), bounds.height(), density)
+        } else {
+            val dm = android.util.DisplayMetrics()
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getRealMetrics(dm)
+            Triple(dm.widthPixels, dm.heightPixels, dm.densityDpi)
+        }
+    }
+
     private fun ensureScreenCapturePermission() {
         if (!hasMediaProjection()) {
             screenCaptureRequestedOnce = true
@@ -256,7 +269,8 @@ class MainActivity : AppCompatActivity() {
                     val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
                     val proj = projectionManager.getMediaProjection(result.resultCode, result.data!!)
                     if (proj != null) {
-                        bound.setMediaProjection(proj, resources.displayMetrics)
+                        val (w, h, d) = getRealScreenMetrics()
+                        bound.setMediaProjection(proj, w, h, d)
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("SCOS3", "Failed to get MediaProjection", e)
@@ -272,13 +286,15 @@ class MainActivity : AppCompatActivity() {
             pendingScreenCaptureResult = null
             if (cb != null) {
                 captureScreenUi(cb)
+            } else {
+                showOverlayUi()
             }
         } else {
             val cb = pendingScreenCaptureResult
             pendingScreenCaptureResult = null
             cb?.invoke(CaptureResult.Failure(IllegalStateException("Screen capture permission denied")))
+            showOverlayUi()
         }
-        showOverlayUi()
     }
 
     private val serviceConnection = object : ServiceConnection {
@@ -296,7 +312,8 @@ class MainActivity : AppCompatActivity() {
                     val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
                     val proj = projectionManager.getMediaProjection(pendingData.first, pendingData.second)
                     if (proj != null) {
-                        bound.setMediaProjection(proj, resources.displayMetrics)
+                        val (w, h, d) = getRealScreenMetrics()
+                        bound.setMediaProjection(proj, w, h, d)
                         setScreenMode(true)
                         val cb = pendingScreenCaptureResult
                         pendingScreenCaptureResult = null

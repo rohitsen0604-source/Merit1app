@@ -424,59 +424,36 @@ class CaptureForegroundService : LifecycleService() {
         }
     }
 
-    fun setMediaProjection(proj: android.media.projection.MediaProjection, metrics: android.util.DisplayMetrics) {
+    private var screenWidth: Int = 0
+    private var screenHeight: Int = 0
+    private var screenDensity: Int = 0
+
+    fun setMediaProjection(
+        proj: android.media.projection.MediaProjection,
+        width: Int,
+        height: Int,
+        density: Int,
+    ) {
         mediaProjection?.stop()
-        runCatching {
-            screenVirtualDisplay?.release()
-            screenImageReader?.close()
-        }
         mediaProjection = proj
+        screenWidth = width
+        screenHeight = height
+        screenDensity = density
         updateForegroundServiceTypeForMediaProjection()
 
-        runCatching {
-            val wm = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
-            val (realWidth, realHeight, realDensity) = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                val bounds = wm.currentWindowMetrics.bounds
-                val d = resources.configuration.densityDpi
-                Triple(bounds.width(), bounds.height(), d)
-            } else {
-                val dm = android.util.DisplayMetrics()
-                @Suppress("DEPRECATION")
-                wm.defaultDisplay.getRealMetrics(dm)
-                Triple(dm.widthPixels, dm.heightPixels, dm.densityDpi)
+        proj.registerCallback(object : android.media.projection.MediaProjection.Callback() {
+            override fun onStop() {
+                android.util.Log.d("SCOS3", "MediaProjection.Callback onStop called")
+                mediaProjection = null
             }
-            val width = if (realWidth > 0) realWidth else metrics.widthPixels
-            val height = if (realHeight > 0) realHeight else metrics.heightPixels
-            val density = if (realDensity > 0) realDensity else metrics.densityDpi
-
-            val imageReader = android.media.ImageReader.newInstance(width, height, android.graphics.PixelFormat.RGBA_8888, 3)
-            screenImageReader = imageReader
-
-            proj.registerCallback(object : android.media.projection.MediaProjection.Callback() {
-                override fun onStop() {
-                    runCatching {
-                        screenVirtualDisplay?.release()
-                        screenVirtualDisplay = null
-                        screenImageReader?.close()
-                        screenImageReader = null
-                    }
-                    mediaProjection = null
-                }
-            }, android.os.Handler(android.os.Looper.getMainLooper()))
-
-            screenVirtualDisplay = proj.createVirtualDisplay(
-                "ScreenCapture",
-                width, height, density,
-                android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader.surface,
-                null, null
-            )
-        }.onFailure {
-            android.util.Log.e("SCOS3", "Failed to setup VirtualDisplay for MediaProjection", it)
-        }
+        }, android.os.Handler(android.os.Looper.getMainLooper()))
     }
 
-    fun hasMediaProjection(): Boolean = mediaProjection != null && screenImageReader != null
+    fun setMediaProjection(proj: android.media.projection.MediaProjection, metrics: android.util.DisplayMetrics) {
+        setMediaProjection(proj, metrics.widthPixels, metrics.heightPixels, metrics.densityDpi)
+    }
+
+    fun hasMediaProjection(): Boolean = mediaProjection != null
 
     private fun imageToBitmap(image: android.media.Image): android.graphics.Bitmap {
         val width = image.width
@@ -486,91 +463,117 @@ class CaptureForegroundService : LifecycleService() {
         val pixelStride = planes[0].pixelStride
         val rowStride = planes[0].rowStride
 
-        val paddedWidth = rowStride / pixelStride
-        val requiredBytes = paddedWidth * height * 4
-        val cleanBuffer = java.nio.ByteBuffer.allocateDirect(requiredBytes)
-        buffer.rewind()
-        cleanBuffer.put(buffer)
-        cleanBuffer.rewind()
+        val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+        val rowPadding = rowStride - pixelStride * width
 
-        val paddedBitmap = android.graphics.Bitmap.createBitmap(paddedWidth, height, android.graphics.Bitmap.Config.ARGB_8888)
-        paddedBitmap.copyPixelsFromBuffer(cleanBuffer)
-
-        return if (paddedWidth != width) {
-            val cropped = android.graphics.Bitmap.createBitmap(paddedBitmap, 0, 0, width, height)
-            paddedBitmap.recycle()
-            cropped
+        if (rowPadding <= 0) {
+            val cleanBuffer = java.nio.ByteBuffer.allocateDirect(width * height * 4)
+            buffer.rewind()
+            val copyLen = minOf(buffer.remaining(), width * height * 4)
+            val temp = buffer.duplicate()
+            temp.limit(copyLen)
+            cleanBuffer.put(temp)
+            cleanBuffer.rewind()
+            bitmap.copyPixelsFromBuffer(cleanBuffer)
         } else {
-            paddedBitmap
+            val cleanBuffer = java.nio.ByteBuffer.allocateDirect(width * height * 4)
+            val rowBytes = width * pixelStride
+            val row = ByteArray(rowBytes)
+            buffer.rewind()
+            for (i in 0 until height) {
+                buffer.position(i * rowStride)
+                val bytesInThisRow = minOf(rowBytes, buffer.remaining())
+                buffer.get(row, 0, bytesInThisRow)
+                cleanBuffer.put(row, 0, bytesInThisRow)
+            }
+            cleanBuffer.rewind()
+            bitmap.copyPixelsFromBuffer(cleanBuffer)
         }
+        return bitmap
     }
 
     fun captureScreen(onBitmap: (android.graphics.Bitmap?) -> Unit) {
-        val imageReader = screenImageReader
-        if (imageReader == null || mediaProjection == null) {
+        val proj = mediaProjection
+        if (proj == null) {
+            android.util.Log.e("SCOS3", "captureScreen: mediaProjection is null!")
             onBitmap(null)
             return
         }
 
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val width = if (screenWidth > 0) screenWidth else resources.displayMetrics.widthPixels
+        val height = if (screenHeight > 0) screenHeight else resources.displayMetrics.heightPixels
+        val density = if (screenDensity > 0) screenDensity else resources.displayMetrics.densityDpi
 
-        // 1. Try immediate acquire
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
         try {
-            val image = imageReader.acquireLatestImage()
-            if (image != null) {
+            val imageReader = android.media.ImageReader.newInstance(width, height, android.graphics.PixelFormat.RGBA_8888, 2)
+            var virtualDisplay: android.hardware.display.VirtualDisplay? = null
+            var handled = false
+
+            fun cleanup() {
+                runCatching { virtualDisplay?.release() }
+                runCatching { imageReader.close() }
+            }
+
+            val timeoutRunnable = Runnable {
+                if (!handled) {
+                    handled = true
+                    imageReader.setOnImageAvailableListener(null, null)
+                    val fallback = runCatching { imageReader.acquireLatestImage() }.getOrNull()
+                    if (fallback != null) {
+                        try {
+                            val bmp = imageToBitmap(fallback)
+                            onBitmap(bmp)
+                        } catch (e: Exception) {
+                            android.util.Log.e("SCOS3", "Fallback imageToBitmap failed", e)
+                            onBitmap(null)
+                        } finally {
+                            fallback.close()
+                            cleanup()
+                        }
+                    } else {
+                        cleanup()
+                        android.util.Log.e("SCOS3", "captureScreen timeout: no frame delivered")
+                        onBitmap(null)
+                    }
+                }
+            }
+
+            imageReader.setOnImageAvailableListener({ reader ->
+                if (handled) return@setOnImageAvailableListener
+                val image = runCatching { reader.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener
+                handled = true
+                mainHandler.removeCallbacks(timeoutRunnable)
+                imageReader.setOnImageAvailableListener(null, null)
                 try {
                     val bmp = imageToBitmap(image)
                     onBitmap(bmp)
-                    return
+                } catch (e: Exception) {
+                    android.util.Log.e("SCOS3", "Listener imageToBitmap failed", e)
+                    onBitmap(null)
                 } finally {
                     image.close()
+                    cleanup()
                 }
-            }
+            }, mainHandler)
+
+            virtualDisplay = proj.createVirtualDisplay(
+                "ScreenCapture",
+                width,
+                height,
+                density,
+                android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.surface,
+                null,
+                null
+            )
+
+            mainHandler.postDelayed(timeoutRunnable, 1500L)
         } catch (e: Exception) {
-            android.util.Log.e("SCOS3", "Initial acquireLatestImage failed", e)
+            android.util.Log.e("SCOS3", "captureScreen exception during setup", e)
+            onBitmap(null)
         }
-
-        // 2. Wait for next frame from SurfaceFlinger
-        var handled = false
-        val timeoutRunnable = Runnable {
-            if (!handled) {
-                handled = true
-                imageReader.setOnImageAvailableListener(null, null)
-                val fallback = runCatching { imageReader.acquireLatestImage() }.getOrNull()
-                if (fallback != null) {
-                    try {
-                        val bmp = imageToBitmap(fallback)
-                        onBitmap(bmp)
-                    } catch (e: Exception) {
-                        android.util.Log.e("SCOS3", "Fallback imageToBitmap failed", e)
-                        onBitmap(null)
-                    } finally {
-                        fallback.close()
-                    }
-                } else {
-                    onBitmap(null)
-                }
-            }
-        }
-
-        imageReader.setOnImageAvailableListener({ reader ->
-            if (handled) return@setOnImageAvailableListener
-            val nextImage = runCatching { reader.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener
-            handled = true
-            handler.removeCallbacks(timeoutRunnable)
-            imageReader.setOnImageAvailableListener(null, null)
-            try {
-                val bmp = imageToBitmap(nextImage)
-                onBitmap(bmp)
-            } catch (e: Exception) {
-                android.util.Log.e("SCOS3", "Listener imageToBitmap failed", e)
-                onBitmap(null)
-            } finally {
-                nextImage.close()
-            }
-        }, handler)
-
-        handler.postDelayed(timeoutRunnable, 1000L)
     }
 
     private fun hasCameraPermission(): Boolean =
