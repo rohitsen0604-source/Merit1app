@@ -84,9 +84,16 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun refreshVolumeStatus() {
-        binding.volumeStatusText.text = "Volume Control: Active (via Volume Keys)"
-        binding.volumeStatusText.setTextColor(getColor(R.color.accent))
-        binding.volumeOpenSettingsButton.visibility = View.GONE
+        val active = com.scos3.camera.service.VolumeKeyAccessibilityService.isRunning()
+        if (active) {
+            binding.volumeStatusText.text = "Volume Control: Active (via Volume Keys)"
+            binding.volumeStatusText.setTextColor(getColor(R.color.accent))
+            binding.volumeOpenSettingsButton.visibility = View.GONE
+        } else {
+            binding.volumeStatusText.text = "Volume Control: Tap button below to enable in Accessibility Settings"
+            binding.volumeStatusText.setTextColor(android.graphics.Color.parseColor("#FF5252"))
+            binding.volumeOpenSettingsButton.visibility = View.VISIBLE
+        }
     }
 
     private fun populateUi() {
