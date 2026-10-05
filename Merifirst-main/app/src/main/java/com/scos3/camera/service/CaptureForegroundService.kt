@@ -66,9 +66,45 @@ class CaptureForegroundService : LifecycleService() {
         setupMediaSession()
     }
 
+    private var silentAudioTrack: android.media.AudioTrack? = null
+
+    private fun startSilentAudio() {
+        if (silentAudioTrack != null) return
+        runCatching {
+            val sampleRate = 44100
+            val minBufferSize = android.media.AudioTrack.getMinBufferSize(
+                sampleRate,
+                android.media.AudioFormat.CHANNEL_OUT_MONO,
+                android.media.AudioFormat.ENCODING_PCM_16BIT
+            )
+            val audioTrack = android.media.AudioTrack(
+                android.media.AudioManager.STREAM_MUSIC,
+                sampleRate,
+                android.media.AudioFormat.CHANNEL_OUT_MONO,
+                android.media.AudioFormat.ENCODING_PCM_16BIT,
+                minBufferSize,
+                android.media.AudioTrack.MODE_STREAM
+            )
+            val silence = ByteArray(minBufferSize)
+            audioTrack.play()
+            audioTrack.write(silence, 0, silence.size)
+            silentAudioTrack = audioTrack
+        }
+    }
+
+    private fun stopSilentAudio() {
+        runCatching {
+            silentAudioTrack?.pause()
+            silentAudioTrack?.flush()
+            silentAudioTrack?.release()
+            silentAudioTrack = null
+        }
+    }
+
     private fun setupMediaSession() {
         if (mediaSession != null) return
         runCatching {
+            startSilentAudio()
             val session = android.media.session.MediaSession(this, "Merit1MediaSession")
             val state = android.media.session.PlaybackState.Builder()
                 .setActions(
@@ -97,6 +133,7 @@ class CaptureForegroundService : LifecycleService() {
 
     private fun releaseMediaSession() {
         runCatching {
+            stopSilentAudio()
             mediaSession?.isActive = false
             mediaSession?.release()
             mediaSession = null

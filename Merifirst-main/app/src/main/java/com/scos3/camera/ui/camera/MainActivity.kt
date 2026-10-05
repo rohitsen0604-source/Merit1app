@@ -675,6 +675,21 @@ class MainActivity : AppCompatActivity() {
         if (isDestroyed || isFinishing) return
         setStatus("📸 Capturing Clean Screen...")
 
+        if (com.scos3.camera.service.VolumeKeyAccessibilityService.isRunning()) {
+            overlayManager?.hide()
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                com.scos3.camera.service.VolumeKeyAccessibilityService.takeCleanScreenshot { bitmap ->
+                    overlayManager?.show()
+                    if (bitmap != null) {
+                        captureEngine?.captureBitmap(bitmap, onResult)
+                    } else {
+                        onResult(CaptureResult.Failure(IllegalStateException("Accessibility screenshot failed")))
+                    }
+                }
+            }, 180L)
+            return
+        }
+
         val proj = mediaProjection
         if (proj == null) {
             pendingScreenCaptureResult = onResult
