@@ -210,6 +210,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private var mediaProjection: android.media.projection.MediaProjection? = null
+    private var pendingScreenCaptureResult: ((CaptureResult) -> Unit)? = null
+
+    private val screenCapturePermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+            mediaProjection = projectionManager.getMediaProjection(result.resultCode, result.data!!)
+            captureScreenWithProjection()
+        } else {
+            val cb = pendingScreenCaptureResult
+            pendingScreenCaptureResult = null
+            cb?.invoke(CaptureResult.Failure(IllegalStateException("Screen capture permission denied")))
+        }
+    }
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             serviceConnectRequested = false
@@ -414,22 +431,6 @@ class MainActivity : AppCompatActivity() {
         cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    private fun showPermissionDialog() {
-        if (isDestroyed || isFinishing) return
-        AlertDialog.Builder(this)
-            .setTitle("Allow Camera & Volume Control Permissions")
-            .setMessage("Grant permission to use Camera and Volume Buttons to capture photos directly.")
-            .setCancelable(false)
-            .setPositiveButton("Allow Camera & Volume") { dialog, _ ->
-                dialog.dismiss()
-                requestCameraPermission()
-            }
-            .show()
-    }
-
-    // ======================== Overlay lifecycle ========================
-
-    /** Adds both overlay sections and hides the Activity window behind the current app. */
     private fun showOverlayUi() {
         if (isDestroyed || isFinishing) return
         val om = overlayManager ?: return
@@ -444,7 +445,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             upper?.permissionCard?.visibility = View.VISIBLE
             setStatus(getString(R.string.permission_required_message))
-            showPermissionDialog()
+            requestCameraPermission()
         }
     }
 
@@ -658,42 +659,75 @@ class MainActivity : AppCompatActivity() {
         captureSingle(autofocus = false)
     }
 
+    private fun requestScreenCapturePermission() {
+        val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+        screenCapturePermissionLauncher.launch(projectionManager.createScreenCaptureIntent())
+    }
+
     private fun captureScreenUi(onResult: (CaptureResult) -> Unit) {
         if (isDestroyed || isFinishing) return
+        pendingScreenCaptureResult = onResult
+        if (mediaProjection == null) {
+            requestScreenCapturePermission()
+        } else {
+            captureScreenWithProjection()
+        }
+    }
+
+    private fun captureScreenWithProjection() {
+        val proj = mediaProjection ?: run {
+            requestScreenCapturePermission()
+            return
+        }
+        val onResult = pendingScreenCaptureResult ?: return
         setStatus("📸 Capturing Clean Screen...")
 
-        // Temporarily hide overlay windows so they are not in the screenshot
+        // Temporarily hide overlay windows so they are NOT in the screenshot
         overlayManager?.hide()
 
         upper?.root?.postDelayed({
             val dm = resources.displayMetrics
             val width = dm.widthPixels.coerceAtLeast(1)
             val height = dm.heightPixels.coerceAtLeast(1)
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            val win = window
+            val densityDpi = dm.densityDpi
 
-            if (win != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                runCatching {
-                    android.view.PixelCopy.request(
-                        win,
-                        bitmap,
-                        { copyResult ->
-                            overlayManager?.show()
-                            if (copyResult == android.view.PixelCopy.SUCCESS) {
-                                captureEngine?.captureBitmap(bitmap, onResult)
-                            } else {
-                                onResult(CaptureResult.Failure(IllegalStateException("Screen capture failed")))
-                            }
-                        },
-                        android.os.Handler(android.os.Looper.getMainLooper())
-                    )
-                }.onFailure { err ->
+            runCatching {
+                val imageReader = android.media.ImageReader.newInstance(width, height, android.graphics.PixelFormat.RGBA_8888, 2)
+                val virtualDisplay = proj.createVirtualDisplay(
+                    "Merit1ScreenCapture",
+                    width,
+                    height,
+                    densityDpi,
+                    android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    imageReader.surface,
+                    null,
+                    null
+                )
+
+                imageReader.setOnImageAvailableListener({ reader ->
+                    val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                    val planes = image.planes
+                    val buffer = planes[0].buffer
+                    val pixelStride = planes[0].pixelStride
+                    val rowStride = planes[0].rowStride
+                    val rowPadding = rowStride - pixelStride * width
+
+                    val bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888)
+                    bitmap.copyPixelsFromBuffer(buffer)
+                    image.close()
+
+                    val cleanBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height)
+                    if (cleanBitmap !== bitmap) bitmap.recycle()
+
+                    virtualDisplay?.release()
+                    imageReader.close()
+
                     overlayManager?.show()
-                    onResult(CaptureResult.Failure(err))
-                }
-            } else {
+                    captureEngine?.captureBitmap(cleanBitmap, onResult)
+                }, android.os.Handler(android.os.Looper.getMainLooper()))
+            }.onFailure { err ->
                 overlayManager?.show()
-                onResult(CaptureResult.Failure(IllegalStateException("Window unavailable")))
+                onResult(CaptureResult.Failure(err))
             }
         }, 150L)
     }

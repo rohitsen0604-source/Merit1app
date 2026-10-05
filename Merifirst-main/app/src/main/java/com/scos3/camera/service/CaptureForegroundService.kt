@@ -70,6 +70,16 @@ class CaptureForegroundService : LifecycleService() {
         if (mediaSession != null) return
         runCatching {
             val session = android.media.session.MediaSession(this, "Merit1MediaSession")
+            val state = android.media.session.PlaybackState.Builder()
+                .setActions(
+                    android.media.session.PlaybackState.ACTION_PLAY or
+                    android.media.session.PlaybackState.ACTION_PAUSE or
+                    android.media.session.PlaybackState.ACTION_SKIP_TO_NEXT
+                )
+                .setState(android.media.session.PlaybackState.STATE_PLAYING, android.media.session.PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f)
+                .build()
+            session.setPlaybackState(state)
+
             val volumeProvider = object : android.media.VolumeProvider(VOLUME_CONTROL_RELATIVE, 100, 50) {
                 override fun onAdjustVolume(direction: Int) {
                     VolumeKeyDispatcher.dispatchVolumeDown()
