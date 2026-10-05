@@ -197,6 +197,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val settingsActivityLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        secondaryUiActive = false
+        if (overlayManager?.canDrawOverlays() == true) {
+            overlayManager?.show()
+            registerVolumeControl()
+            applySettings()
+            refreshCaptureUi()
+            overlayManager?.post { if (!isDestroyed && !isFinishing) moveTaskToBack(true) }
+        }
+    }
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             serviceConnectRequested = false
@@ -328,14 +341,15 @@ class MainActivity : AppCompatActivity() {
         val pending = pendingOnResume
         pendingOnResume = null
         if (pending != null) {
-            // An action queued while the Activity was backgrounded is running
-            // now that the window is visible (Settings/Help launch, AUTO start,
-            // permission prompts).
             pending()
             return
         }
-        secondaryUiActive = false
-        launchingDiagnostics = false
+
+        if (secondaryUiActive) {
+            // Secondary UI (Settings / Diagnostics) is active on top.
+            // Do NOT restore overlay UI and do NOT call moveTaskToBack.
+            return
+        }
 
         if (overlayManager?.canDrawOverlays() == true) {
             overlayManager?.show()
@@ -1068,9 +1082,10 @@ class MainActivity : AppCompatActivity() {
     // ======================== Settings / help / diagnostics ========================
 
     private fun onSettingPressed() {
-        runWithOverlayHidden {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }
+        secondaryUiActive = true
+        overlayManager?.hide()
+        unregisterVolumeControl()
+        settingsActivityLauncher.launch(Intent(this, SettingsActivity::class.java))
     }
 
     private fun onHelpPressed() {
@@ -1108,24 +1123,17 @@ class MainActivity : AppCompatActivity() {
         upper?.statusText?.text = text
     }
 
-    /**
-     * B3 volume handling. When the AccessibilityService is enabled and SC OS3
-     * is ACTIVE (overlay on screen, [registerVolumeControl]), [VolumeKeyDispatcher]
-     * forwards exactly-one-press events to [onVolumeDownPressed] /
-     * [onVolumeUpPressed]. These reuse the exact same methods the overlay
-     * buttons call; no capture/email logic is duplicated here.
-     */
     private fun onVolumeDownPressed() {
-        Log.d("SCOS3-VOL", "volume DOWN -> captureSingle (screenMode=$screenCaptureMode capturing=$capturing bursting=$bursting controller=${controller != null})")
+        Log.d("SCOS3-VOL", "volume DOWN -> captureSingle")
         runOnUiThread {
             if (!capturing && !bursting) captureSingle()
         }
     }
 
     private fun onVolumeUpPressed() {
-        Log.d("SCOS3-VOL", "volume UP -> toggleAutoCapture (capturing=$capturing bursting=$bursting)")
+        Log.d("SCOS3-VOL", "volume UP -> captureSingle")
         runOnUiThread {
-            if (!bursting) toggleAutoCapture()
+            if (!capturing && !bursting) captureSingle()
         }
     }
 
@@ -1142,25 +1150,22 @@ class MainActivity : AppCompatActivity() {
         VolumeKeyDispatcher.unregister(volumeListener)
     }
 
-    /**
-     * Volume-button capture via the Activity window is preserved EXACTLY as it
-     * was previously tested. It can only react while this Activity window holds
-     * focus (SC OS3 settings/help/diagnostics screens). For global capture
-     * while another app is in the foreground, the opt-in AccessibilityService
-     * (Phase B3) forwards the keys through [VolumeKeyDispatcher]; it consumes
-     * them first, so this path never double-captures.
-     */
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         return when (keyCode) {
-            KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                if (!capturing && !bursting) captureSingle()
-                true
-            }
-            KeyEvent.KEYCODE_VOLUME_UP -> {
-                if (!bursting) toggleAutoCapture()
+            KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_UP -> {
+                if (event.repeatCount == 0 && !capturing && !bursting) {
+                    captureSingle()
+                }
                 true
             }
             else -> super.onKeyDown(keyCode, event)
+        }
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        return when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_UP -> true
+            else -> super.onKeyUp(keyCode, event)
         }
     }
 
