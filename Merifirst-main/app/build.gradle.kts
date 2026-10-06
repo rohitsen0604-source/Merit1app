@@ -13,8 +13,8 @@ android {
         applicationId = "com.scos3.camera"
         minSdk = 29
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.13.0"
+        versionCode = 15
+        versionName = "0.15.0"
     }
 
     signingConfigs {

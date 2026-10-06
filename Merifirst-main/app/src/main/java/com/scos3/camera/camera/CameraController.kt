@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Size
+import android.hardware.camera2.CaptureRequest
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.Camera
@@ -115,8 +116,12 @@ class CameraController(context: Context) {
         val provider = cameraProvider ?: return
         provider.unbindAll()
 
-        val selector = buildSelector()
-        if (!provider.hasCamera(selector)) return
+        var selector = buildSelector()
+        if (!provider.hasCamera(selector)) {
+            lens = Lens.BACK
+            selector = buildSelector()
+            if (!provider.hasCamera(selector)) return
+        }
 
         boundOwner = owner
         boundPreviewView = previewView
@@ -132,6 +137,17 @@ class CameraController(context: Context) {
         imageCapture = capture
         imageAnalysis = analysis
         applyRatio(lastTargetRatio)
+
+        previewView.post {
+            if (previewView.width > 0 && previewView.height > 0) {
+                val point = previewView.meteringPointFactory.createPoint(previewView.width / 2f, previewView.height / 2f)
+                camera?.cameraControl?.startFocusAndMetering(
+                    FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+                        .setAutoCancelDuration(2, java.util.concurrent.TimeUnit.SECONDS)
+                        .build()
+                )
+            }
+        }
     }
 
     /**
@@ -192,6 +208,10 @@ class CameraController(context: Context) {
     private fun buildPreview(previewView: PreviewView): Preview {
         val builder = Preview.Builder()
         applyPhysicalCamera(builder)
+        Camera2Interop.Extender(builder).apply {
+            setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+        }
         return builder.build().also {
             it.setSurfaceProvider(previewView.surfaceProvider)
         }
@@ -380,54 +400,7 @@ class CameraController(context: Context) {
             onResult(result)
         }
 
-        val cam = camera
-        val preview = boundPreviewView?.takeIf { it.width > 0 && it.height > 0 }
-        val point = preview?.let { pv ->
-            pv.meteringPointFactory.createPoint(pv.width / 2f, pv.height / 2f)
-        }
-        if (cam == null || point == null) {
-            captureEngine.captureSingle(capture, finish)
-            return
-        }
-
-        val initialRatio = currentZoomRatio()
-        val (minZoom, maxZoom) = sliderRange()
-        val targetMax = if (maxZoom > minZoom) maxZoom else (initialRatio * 2.0f)
-        val zoomInRatio = (initialRatio * 1.4f).coerceAtMost(targetMax)
-
-        // Step 1: Auto Zoom In (1.4x zoom)
-        setZoomRatio(zoomInRatio)
-
-        // Step 2: Auto Zoom Out back to initial ratio after 180ms
-        focusTimeoutHandler.postDelayed({
-            setZoomRatio(initialRatio)
-
-            // Step 3: Trigger Auto Focus lock after returning to initial zoom (180ms later)
-            focusTimeoutHandler.postDelayed({
-                val focusFuture = runCatching {
-                    cam.cameraControl.startFocusAndMetering(
-                        FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF).build()
-                    )
-                }.getOrNull()
-                if (focusFuture == null) {
-                    captureEngine.captureSingle(capture, finish)
-                    return@postDelayed
-                }
-
-                val done = object : Runnable {
-                    private var fired = false
-                    override fun run() {
-                        if (fired) return
-                        fired = true
-                        focusTimeoutHandler.removeCallbacks(this)
-                        runCatching { captureEngine.captureSingle(capture, finish) }
-                            .onFailure { finish(CaptureResult.Failure(it)) }
-                    }
-                }
-                focusFuture.addListener(done, mainExecutor)
-                focusTimeoutHandler.postDelayed(done, FOCUS_TIMEOUT_MS)
-            }, 180L)
-        }, 180L)
+        captureEngine.captureSingle(capture, finish)
     }
 
     /** Enables/disables FACE auto-capture and wires the capture trigger. */

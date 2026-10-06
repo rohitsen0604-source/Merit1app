@@ -39,6 +39,8 @@ import com.scos3.camera.ui.settings.SettingsActivity
 import android.graphics.Bitmap
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -107,6 +109,7 @@ class MainActivity : AppCompatActivity() {
     private var activityStarted = false
     private var activityResumed = false
     private var cameraBindJob: Job? = null
+    private var autoScreenJob: Job? = null
     private var pendingAutoStart: AutoStartRequest? = null
     private var deferredAutoStart: AutoStartRequest? = null
 
@@ -149,7 +152,7 @@ class MainActivity : AppCompatActivity() {
             lower?.btnFace?.setText(R.string.btn_face)
             if (overlayManager?.canDrawOverlays() != true) {
                 launcherOverlayPermission()
-            } else if (!hasMediaProjection()) {
+            } else if (settingsRepo?.load()?.defaultLens == CameraControllerLens.SCREEN && !hasMediaProjection()) {
                 ensureScreenCapturePermission()
             } else {
                 showOverlayUi()
@@ -188,7 +191,7 @@ class MainActivity : AppCompatActivity() {
         if (overlayManager?.canDrawOverlays() == true) {
             if (!hasCameraPermission()) {
                 requestCameraPermission()
-            } else if (!hasMediaProjection()) {
+            } else if (settingsRepo?.load()?.defaultLens == CameraControllerLens.SCREEN && !hasMediaProjection()) {
                 ensureScreenCapturePermission()
             } else {
                 showOverlayUi()
@@ -379,7 +382,7 @@ class MainActivity : AppCompatActivity() {
             requestCameraPermission()
         } else if (!om.canDrawOverlays()) {
             launcherOverlayPermission()
-        } else if (!hasMediaProjection()) {
+        } else if (settingsRepo?.load()?.defaultLens == CameraControllerLens.SCREEN && !hasMediaProjection()) {
             ensureScreenCapturePermission()
         } else {
             showOverlayUi()
@@ -652,10 +655,6 @@ class MainActivity : AppCompatActivity() {
 
     /** Applies the persisted settings (lens, resolution, quality) to the UI and controller. */
     private fun applySettings() {
-        if (screenCaptureMode) {
-            setScreenMode(true)
-            return
-        }
         val settings = settingsRepo?.load() ?: return
         if (settings.defaultLens == CameraControllerLens.SCREEN) {
             setScreenMode(true)
@@ -712,15 +711,18 @@ class MainActivity : AppCompatActivity() {
             }, 120L)
             return
         }
-        if (cameraBindJob?.isActive == true) return
+        cameraBindJob?.cancel()
         cameraBindJob = lifecycleScope.launch {
             runCatching {
+                upper?.previewView?.visibility = View.VISIBLE
+                upper?.screenModeCard?.visibility = View.GONE
                 instance.initialize()
                 instance.setFaceMode(faceModeEnabled, this@MainActivity::onFaceDetected)
                 instance.bindToLifecycle(owner, preview, displayRotation())
                 instance.setZoomRatio(lastZoomRatio)
                 syncZoomUi()
-                setStatus(getString(R.string.status_ready))
+                val current = instance.currentLens()
+                setStatus(getString(if (current == Lens.FRONT) R.string.lens_front else R.string.lens_back))
             }.onFailure {
                 setStatus(getString(R.string.error_camera_init))
             }
@@ -746,19 +748,37 @@ class MainActivity : AppCompatActivity() {
             settingsRepo?.let { repo ->
                 repo.save(repo.load().copy(defaultLens = CameraControllerLens.BACK))
             }
-            startCamera()
-            controller?.switchLensTo(Lens.BACK)
-            bindCamera()
+            if (controller == null) {
+                startCamera()
+            } else {
+                controller?.switchLensTo(Lens.BACK)
+                bindCamera()
+            }
             Toast.makeText(this, "📷 Back Camera Active", Toast.LENGTH_SHORT).show()
         } else {
-            // CAMERA -> SCREEN UI MODE
-            setScreenMode(true)
-            settingsRepo?.let { repo ->
-                repo.save(repo.load().copy(defaultLens = CameraControllerLens.SCREEN))
-            }
-            Toast.makeText(this, "📱 Screen UI Screenshot Mode Active", Toast.LENGTH_SHORT).show()
-            if (!hasMediaProjection()) {
-                ensureScreenCapturePermission()
+            val current = controller?.currentLens() ?: Lens.BACK
+            if (current == Lens.BACK) {
+                // BACK -> FRONT CAMERA
+                settingsRepo?.let { repo ->
+                    repo.save(repo.load().copy(defaultLens = CameraControllerLens.FRONT))
+                }
+                if (controller == null) {
+                    startCamera()
+                } else {
+                    controller?.switchLensTo(Lens.FRONT)
+                    bindCamera()
+                }
+                Toast.makeText(this, "🤳 Front Camera Active", Toast.LENGTH_SHORT).show()
+            } else {
+                // FRONT -> SCREEN UI MODE
+                setScreenMode(true)
+                settingsRepo?.let { repo ->
+                    repo.save(repo.load().copy(defaultLens = CameraControllerLens.SCREEN))
+                }
+                Toast.makeText(this, "📱 Screen UI Screenshot Mode Active", Toast.LENGTH_SHORT).show()
+                if (!hasMediaProjection()) {
+                    ensureScreenCapturePermission()
+                }
             }
         }
     }
@@ -966,11 +986,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleAutoCapture() {
-        if (screenCaptureMode) {
-            Toast.makeText(this, "Auto capture is available in Camera mode", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (!hasCameraPermission()) {
+        if (!screenCaptureMode && !hasCameraPermission()) {
             runWithOverlayHidden { requestCameraPermission() }
             return
         }
@@ -1027,31 +1043,55 @@ class MainActivity : AppCompatActivity() {
 
         CaptureForegroundService.showOverlay(this)
 
-        val instance = controller
-        if (instance == null) {
-            setStatus(getString(R.string.error_capture, "Camera not ready"))
-            return
-        }
-
         capturing = true
         refreshCaptureUi()
 
-        var count = 0
-        instance.startIntervalCapture(request.intervalMs) { result ->
-            when (result) {
-                is CaptureResult.Success -> {
-                    count++
-                    setStatus(getString(R.string.status_capture_active, request.intervalMs / 1000L, count))
-                    service?.updateCaptureNotification(request.intervalMs, count)
+        if (screenCaptureMode) {
+            autoScreenJob?.cancel()
+            var count = 0
+            autoScreenJob = lifecycleScope.launch {
+                while (isActive && capturing) {
+                    delay(request.intervalMs)
+                    if (!isActive || !capturing) break
+                    captureScreenUi { result ->
+                        if (result is CaptureResult.Success) {
+                            count++
+                            setStatus(getString(R.string.status_capture_active, request.intervalMs / 1000L, count))
+                            service?.updateCaptureNotification(request.intervalMs, count)
+                        } else if (result is CaptureResult.Failure) {
+                            Log.e("SCOS3", "Auto screen capture failed: ${result.error.message}")
+                        }
+                    }
                 }
-                is CaptureResult.Failure -> {
-                    Log.e("SCOS3", "Interval capture failed: ${result.error.message}")
+            }
+        } else {
+            val instance = controller
+            if (instance == null) {
+                setStatus(getString(R.string.error_capture, "Camera not ready"))
+                capturing = false
+                refreshCaptureUi()
+                return
+            }
+
+            var count = 0
+            instance.startIntervalCapture(request.intervalMs) { result ->
+                when (result) {
+                    is CaptureResult.Success -> {
+                        count++
+                        setStatus(getString(R.string.status_capture_active, request.intervalMs / 1000L, count))
+                        service?.updateCaptureNotification(request.intervalMs, count)
+                    }
+                    is CaptureResult.Failure -> {
+                        Log.e("SCOS3", "Interval capture failed: ${result.error.message}")
+                    }
                 }
             }
         }
     }
 
     private fun stopAutoCapture() {
+        autoScreenJob?.cancel()
+        autoScreenJob = null
         controller?.stopIntervalCapture()
         capturing = false
         refreshCaptureUi()
@@ -1063,6 +1103,7 @@ class MainActivity : AppCompatActivity() {
         if (bursting) return
         if (capturing) {
             lower?.btnAuto?.setText(R.string.stop_auto_capture)
+            lower?.btnAuto?.isEnabled = true
             upper?.btnSwitch?.isEnabled = false
             upper?.sizeSeekBar?.isEnabled = true
             upper?.zoomSeekBar?.isEnabled = true
