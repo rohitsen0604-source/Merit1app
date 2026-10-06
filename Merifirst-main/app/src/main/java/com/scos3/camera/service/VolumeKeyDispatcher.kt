@@ -46,6 +46,11 @@ object VolumeKeyDispatcher {
         listeners.clear()
     }
 
+    private var lastVolumeDownTime = 0L
+    private var lastVolumeUpTime = 0L
+    private const val DEBOUNCE_DOWN_MS = 450L
+    private const val DEBOUNCE_UP_MS = 600L
+
     /**
      * Dispatches a Volume Down press. Returns true when SC OS3 consumed the key
      * (must then be consumed by the caller); returns false when SC OS3 is
@@ -53,6 +58,9 @@ object VolumeKeyDispatcher {
      */
     fun dispatchVolumeDown(): Boolean {
         if (listeners.isEmpty()) return false
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastVolumeDownTime < DEBOUNCE_DOWN_MS) return true
+        lastVolumeDownTime = now
         listeners.forEach { it.onVolumeDown() }
         return true
     }
@@ -63,6 +71,9 @@ object VolumeKeyDispatcher {
      */
     fun dispatchVolumeUp(): Boolean {
         if (listeners.isEmpty()) return false
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastVolumeUpTime < DEBOUNCE_UP_MS) return true
+        lastVolumeUpTime = now
         listeners.forEach { it.onVolumeUp() }
         return true
     }

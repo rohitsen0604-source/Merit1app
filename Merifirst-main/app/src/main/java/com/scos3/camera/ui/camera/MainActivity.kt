@@ -19,6 +19,8 @@ import android.view.View
 import android.widget.SeekBar
 import android.widget.Toast
 import android.util.Log
+import android.os.SystemClock
+import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -294,6 +296,17 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+        }
 
         settingsRepo = SettingsRepository(this)
         emailManager = EmailManagerProvider.get(this)
@@ -628,6 +641,11 @@ class MainActivity : AppCompatActivity() {
                 syncZoomUi()
                 val current = instance.currentLens()
                 setStatus(getString(if (current == Lens.FRONT) R.string.lens_front else R.string.lens_back))
+                upper?.focusRing?.postDelayed({
+                    if (!blackActive && !isDestroyed && !isFinishing) {
+                        upper?.focusRing?.startFocusAnimation()
+                    }
+                }, 400L)
             }.onFailure {
                 setStatus(getString(R.string.error_camera_init))
             }
@@ -684,8 +702,17 @@ class MainActivity : AppCompatActivity() {
         onResult(CaptureResult.Failure(IllegalStateException("Screen capture is disabled")))
     }
 
+    private var lastCaptureTime = 0L
+
     private fun captureSingle(autofocus: Boolean = true) {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastCaptureTime < 500L) return
+        lastCaptureTime = now
+
         if (capturing || bursting) return
+        if (autofocus && !blackActive) {
+            upper?.focusRing?.startFocusAnimation()
+        }
         setStatus(getString(R.string.status_waiting_camera))
         val onResult: (CaptureResult) -> Unit = { result ->
             controller?.onFaceCaptureFinished()
@@ -839,7 +866,16 @@ class MainActivity : AppCompatActivity() {
         moveTaskToBack(true)
     }
 
+    private var lastAutoToggleTime = 0L
+
     private fun toggleAutoCapture() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastAutoToggleTime < 800L) {
+            Log.d("SCOS3-VOL", "toggleAutoCapture debounced (ignoring duplicate event within 800ms)")
+            return
+        }
+        lastAutoToggleTime = now
+
         if (!hasCameraPermission()) {
             runWithOverlayHidden { requestCameraPermission() }
             return
@@ -900,6 +936,10 @@ class MainActivity : AppCompatActivity() {
         capturing = true
         refreshCaptureUi()
 
+        if (!blackActive) {
+            upper?.focusRing?.startFocusAnimation()
+        }
+
         val instance = controller
         if (instance == null) {
             setStatus(getString(R.string.error_capture, "Camera not ready"))
@@ -929,6 +969,8 @@ class MainActivity : AppCompatActivity() {
         controller?.stopIntervalCapture()
         capturing = false
         refreshCaptureUi()
+        val current = controller?.currentLens() ?: Lens.FRONT
+        setStatus(getString(if (current == Lens.FRONT) R.string.lens_front else R.string.lens_back))
         service?.updateCaptureNotification(0L, 0)
     }
 
@@ -1088,6 +1130,9 @@ class MainActivity : AppCompatActivity() {
             val preview = upper?.previewView ?: return true
             val point = preview.meteringPointFactory.createPoint(event.x, event.y)
             controller?.focusAtPoint(point)
+            if (!blackActive) {
+                upper?.focusRing?.startFocusAnimation(event.x, event.y)
+            }
         }
         return true
     }

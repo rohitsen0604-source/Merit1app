@@ -36,6 +36,14 @@
             android:layout_margin="2dp"
             app:implementationMode="compatible" />
 
+        <!-- Visual Auto-Focus Ring & Reticle -->
+        <com.scos3.camera.ui.camera.FocusRingView
+            android:id="@+id/focusRing"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_gravity="center"
+            android:visibility="gone" />
+
         <!-- BLACK mode: fully obscures the live preview surface. The camera
              session keeps running underneath; controls stay usable. -->
         <View
