@@ -23,8 +23,7 @@ class SettingsRepository(context: Context) {
         quality = JpegQuality.entries.firstOrNull { it.key == prefs.getInt(KEY_QUALITY, JpegQuality.HIGH.key) }
             ?: JpegQuality.HIGH,
         intervalMs = prefs.getLong(KEY_INTERVAL_MS, DEFAULT_INTERVAL_MS),
-        defaultLens = CameraControllerLens.entries.firstOrNull { it.name == prefs.getString(KEY_LENS, null) }
-            ?: CameraControllerLens.BACK,
+        defaultLens = if (prefs.getString(KEY_LENS, null) == "BACK") CameraControllerLens.BACK else CameraControllerLens.FRONT,
         emailEnabled = prefs.getBoolean(KEY_EMAIL_ENABLED, false),
         gallerySaveEnabled = prefs.getBoolean(KEY_GALLERY_SAVE_ENABLED, true),
         gmail = GmailSettings(

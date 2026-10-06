@@ -1,6 +1,7 @@
 package com.scos3.camera.capture
 
 import android.content.Context
+import android.os.PowerManager
 import android.util.Log
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -62,6 +63,23 @@ class CaptureEngine(context: Context) {
     private var currentIntervalMs: Long = 0L
     private var currentImageCapture: ImageCapture? = null
     private var currentListener: ((CaptureResult) -> Unit)? = null
+
+    private val appContext = context.applicationContext
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    private fun acquireWakeLock() {
+        if (wakeLock != null) return
+        val pm = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "scos3:auto_capture").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.takeIf { it.isHeld }?.release()
+        wakeLock = null
+    }
 
     private var burstStopped = true
     private var currentBurstCount = 0
@@ -139,6 +157,7 @@ class CaptureEngine(context: Context) {
     ) {
         if (intervalMs <= 0L) return
         stopInterval()
+        acquireWakeLock()
         burstStopped = true
         currentIntervalMs = intervalMs
         currentImageCapture = imageCapture
@@ -155,9 +174,21 @@ class CaptureEngine(context: Context) {
                 val listener = currentListener
                 if (capture == null || listener == null) return
                 if (!capturing.compareAndSet(false, true)) return
+
+                // Watchdog: If capture takes > 6s, force reset capturing flag so interval never hangs
+                val watchdog = scheduler.schedule({
+                    if (capturing.compareAndSet(true, false)) {
+                        Log.w("SCOS3-CAPTURE", "Interval capture watchdog timed out, rescheduling")
+                        if (!stopped) {
+                            scheduleNext()
+                        }
+                    }
+                }, 6000L, TimeUnit.MILLISECONDS)
+
                 captureSingle(capture) { result ->
+                    watchdog.cancel(false)
                     capturing.set(false)
-                    listener(result)
+                    mainExecutor.execute { listener(result) }
                     if (!stopped) {
                         scheduledFuture = scheduler.schedule(this, currentIntervalMs, TimeUnit.MILLISECONDS)
                     }
@@ -180,6 +211,7 @@ class CaptureEngine(context: Context) {
         currentImageCapture = null
         currentListener = null
         capturing.set(false)
+        releaseWakeLock()
     }
 
     /**

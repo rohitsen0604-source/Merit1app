@@ -152,8 +152,6 @@ class MainActivity : AppCompatActivity() {
             lower?.btnFace?.setText(R.string.btn_face)
             if (overlayManager?.canDrawOverlays() != true) {
                 launcherOverlayPermission()
-            } else if (settingsRepo?.load()?.defaultLens == CameraControllerLens.SCREEN && !hasMediaProjection()) {
-                ensureScreenCapturePermission()
             } else {
                 showOverlayUi()
             }
@@ -191,8 +189,6 @@ class MainActivity : AppCompatActivity() {
         if (overlayManager?.canDrawOverlays() == true) {
             if (!hasCameraPermission()) {
                 requestCameraPermission()
-            } else if (settingsRepo?.load()?.defaultLens == CameraControllerLens.SCREEN && !hasMediaProjection()) {
-                ensureScreenCapturePermission()
             } else {
                 showOverlayUi()
             }
@@ -227,7 +223,7 @@ class MainActivity : AppCompatActivity() {
     private var screenCaptureRequestedOnce = false
     private var pendingMediaProjectionData: Pair<Int, Intent>? = null
 
-    private fun hasMediaProjection(): Boolean = service?.hasMediaProjection() == true
+    private fun hasMediaProjection(): Boolean = false
 
     private fun getRealScreenMetrics(): Triple<Int, Int, Int> {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -243,61 +239,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun ensureScreenCapturePermission() {
-        if (!hasMediaProjection()) {
-            screenCaptureRequestedOnce = true
-            runCatching {
-                val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-                val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    projectionManager.createScreenCaptureIntent(
-                        android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay()
-                    )
-                } else {
-                    projectionManager.createScreenCaptureIntent()
-                }
-                screenCapturePermissionLauncher.launch(intent)
-            }.onFailure {
-                android.util.Log.e("SCOS3", "Failed to launch screenCapture intent", it)
-            }
-        }
+        // Disabled: screen capture / MediaProjection is completely removed
     }
 
     private val screenCapturePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK && result.data != null) {
-            val bound = service
-            if (bound != null) {
-                bound.updateForegroundServiceTypeForMediaProjection()
-                try {
-                    val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-                    val proj = projectionManager.getMediaProjection(result.resultCode, result.data!!)
-                    if (proj != null) {
-                        val (w, h, d) = getRealScreenMetrics()
-                        bound.setMediaProjection(proj, w, h, d)
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("SCOS3", "Failed to get MediaProjection", e)
-                }
-            } else {
-                pendingMediaProjectionData = Pair(result.resultCode, result.data!!)
-            }
-            setScreenMode(true)
-            settingsRepo?.let { repo ->
-                repo.save(repo.load().copy(defaultLens = CameraControllerLens.SCREEN))
-            }
-            val cb = pendingScreenCaptureResult
-            pendingScreenCaptureResult = null
-            if (cb != null) {
-                captureScreenUi(cb)
-            } else {
-                showOverlayUi()
-            }
-        } else {
-            val cb = pendingScreenCaptureResult
-            pendingScreenCaptureResult = null
-            cb?.invoke(CaptureResult.Failure(IllegalStateException("Screen capture permission denied")))
-            showOverlayUi()
-        }
+    ) {
+        // No-op
     }
 
     private val serviceConnection = object : ServiceConnection {
@@ -307,29 +255,6 @@ class MainActivity : AppCompatActivity() {
             service = bound
             serviceBound = true
             serviceStateKnown = true
-            val pendingData = pendingMediaProjectionData
-            if (pendingData != null) {
-                pendingMediaProjectionData = null
-                bound.updateForegroundServiceTypeForMediaProjection()
-                runCatching {
-                    val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-                    val proj = projectionManager.getMediaProjection(pendingData.first, pendingData.second)
-                    if (proj != null) {
-                        val (w, h, d) = getRealScreenMetrics()
-                        bound.setMediaProjection(proj, w, h, d)
-                        setScreenMode(true)
-                        val cb = pendingScreenCaptureResult
-                        pendingScreenCaptureResult = null
-                        if (cb != null) {
-                            captureScreenUi(cb)
-                        }
-                    }
-                }.onFailure {
-                    android.util.Log.e("SCOS3", "Failed to set pending MediaProjection", it)
-                }
-            } else if (bound.hasMediaProjection()) {
-                bound.updateForegroundServiceTypeForMediaProjection()
-            }
             if (isDestroyed || isFinishing) return
             bound.addListener(statusListener)
             capturing = bound.isCapturing()
@@ -382,9 +307,12 @@ class MainActivity : AppCompatActivity() {
             requestCameraPermission()
         } else if (!om.canDrawOverlays()) {
             launcherOverlayPermission()
-        } else if (settingsRepo?.load()?.defaultLens == CameraControllerLens.SCREEN && !hasMediaProjection()) {
-            ensureScreenCapturePermission()
         } else {
+            // Ensure default lens is not SCREEN; default to front if needed
+            val repo = settingsRepo
+            if (repo?.load()?.defaultLens == CameraControllerLens.SCREEN) {
+                repo.save(repo.load().copy(defaultLens = CameraControllerLens.FRONT))
+            }
             showOverlayUi()
         }
     }
@@ -535,15 +463,11 @@ class MainActivity : AppCompatActivity() {
         if (isDestroyed || isFinishing) return
         val om = overlayManager ?: return
         if (!om.canDrawOverlays()) return
-        if (!hasMediaProjection() && !screenCaptureRequestedOnce) {
-            ensureScreenCapturePermission()
-            return
-        }
         om.show()
         registerVolumeControl()
         applySettings()
         val cameraGranted = hasCameraPermission()
-        if (cameraGranted || screenCaptureMode) {
+        if (cameraGranted) {
             upper?.permissionCard?.visibility = View.GONE
             om.post { if (!isDestroyed && !isFinishing) moveTaskToBack(true) }
         } else {
@@ -631,40 +555,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setScreenMode(enabled: Boolean) {
-        screenCaptureMode = enabled
-        if (enabled) {
-            cameraBindJob?.cancel()
-            controller?.release()
-            controller = null
-            upper?.btnSwitch?.text = "SCREEN"
-            upper?.previewView?.visibility = View.GONE
-            upper?.blackOverlay?.visibility = View.GONE
-            upper?.screenModeCard?.visibility = View.VISIBLE
-            upper?.zoomSeekBar?.isEnabled = false
-            upper?.zoomText?.visibility = View.INVISIBLE
-            setStatus("📱 Screen Capture Mode")
-        } else {
-            upper?.btnSwitch?.text = getString(R.string.btn_switch)
-            upper?.previewView?.visibility = View.VISIBLE
-            upper?.blackOverlay?.visibility = if (blackActive) View.VISIBLE else View.GONE
-            upper?.screenModeCard?.visibility = View.GONE
-            val current = controller?.currentLens() ?: Lens.BACK
-            setStatus(getString(if (current == Lens.FRONT) R.string.lens_front else R.string.lens_back))
-        }
+        screenCaptureMode = false
+        upper?.btnSwitch?.text = getString(R.string.btn_switch)
+        upper?.previewView?.visibility = View.VISIBLE
+        upper?.blackOverlay?.visibility = if (blackActive) View.VISIBLE else View.GONE
+        upper?.screenModeCard?.visibility = View.GONE
+        val current = controller?.currentLens() ?: Lens.FRONT
+        setStatus(getString(if (current == Lens.FRONT) R.string.lens_front else R.string.lens_back))
     }
 
     /** Applies the persisted settings (lens, resolution, quality) to the UI and controller. */
     private fun applySettings() {
         val settings = settingsRepo?.load() ?: return
-        if (settings.defaultLens == CameraControllerLens.SCREEN) {
-            setScreenMode(true)
-            if (!hasMediaProjection()) {
-                ensureScreenCapturePermission()
-            }
-            return
-        }
         setScreenMode(false)
-        val target = if (settings.defaultLens == CameraControllerLens.FRONT) Lens.FRONT else Lens.BACK
+        val target = if (settings.defaultLens == CameraControllerLens.BACK) Lens.BACK else Lens.FRONT
         if (hasCameraPermission() && !capturing) {
             ensureOverlayService()
             if (controller == null) {
@@ -682,12 +586,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startCamera() {
-        if (capturing || screenCaptureMode) return
+        if (capturing) return
+        screenCaptureMode = false
         ensureOverlayService()
         val instance = CameraController(applicationContext)
         controller = instance
         val settings = settingsRepo?.load()
-        val target = if (settings?.defaultLens == CameraControllerLens.FRONT) Lens.FRONT else Lens.BACK
+        val target = if (settings?.defaultLens == CameraControllerLens.BACK) Lens.BACK else Lens.FRONT
         instance.switchLensTo(target)
         applyStoredResolutionAndQuality()
         bindCamera()
@@ -742,9 +647,9 @@ class MainActivity : AppCompatActivity() {
             setStatus(getString(R.string.status_capture_running))
             return
         }
-        if (screenCaptureMode) {
-            // SCREEN -> BACK CAMERA
-            setScreenMode(false)
+        val current = controller?.currentLens() ?: Lens.FRONT
+        if (current == Lens.FRONT) {
+            // Switch to back camera
             settingsRepo?.let { repo ->
                 repo.save(repo.load().copy(defaultLens = CameraControllerLens.BACK))
             }
@@ -756,30 +661,17 @@ class MainActivity : AppCompatActivity() {
             }
             Toast.makeText(this, "📷 Back Camera Active", Toast.LENGTH_SHORT).show()
         } else {
-            val current = controller?.currentLens() ?: Lens.BACK
-            if (current == Lens.BACK) {
-                // BACK -> FRONT CAMERA
-                settingsRepo?.let { repo ->
-                    repo.save(repo.load().copy(defaultLens = CameraControllerLens.FRONT))
-                }
-                if (controller == null) {
-                    startCamera()
-                } else {
-                    controller?.switchLensTo(Lens.FRONT)
-                    bindCamera()
-                }
-                Toast.makeText(this, "🤳 Front Camera Active", Toast.LENGTH_SHORT).show()
-            } else {
-                // FRONT -> SCREEN UI MODE
-                setScreenMode(true)
-                settingsRepo?.let { repo ->
-                    repo.save(repo.load().copy(defaultLens = CameraControllerLens.SCREEN))
-                }
-                Toast.makeText(this, "📱 Screen UI Screenshot Mode Active", Toast.LENGTH_SHORT).show()
-                if (!hasMediaProjection()) {
-                    ensureScreenCapturePermission()
-                }
+            // Switch to front camera
+            settingsRepo?.let { repo ->
+                repo.save(repo.load().copy(defaultLens = CameraControllerLens.FRONT))
             }
+            if (controller == null) {
+                startCamera()
+            } else {
+                controller?.switchLensTo(Lens.FRONT)
+                bindCamera()
+            }
+            Toast.makeText(this, "🤳 Front Camera Active", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -789,41 +681,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun captureScreenUi(onResult: (CaptureResult) -> Unit) {
         if (isDestroyed || isFinishing) return
-        setStatus("📸 Capturing Clean Screen...")
-
-        if (com.scos3.camera.service.VolumeKeyAccessibilityService.isRunning()) {
-            overlayManager?.hide()
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                com.scos3.camera.service.VolumeKeyAccessibilityService.takeCleanScreenshot { bitmap ->
-                    overlayManager?.show()
-                    if (bitmap != null) {
-                        captureEngine?.captureBitmap(bitmap, onResult)
-                    } else {
-                        onResult(CaptureResult.Failure(IllegalStateException("Screenshot failed")))
-                    }
-                }
-            }, 150L)
-            return
-        }
-
-        val s = service
-        if (s != null && s.hasMediaProjection()) {
-            overlayManager?.hide()
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                s.captureScreen { bitmap ->
-                    overlayManager?.show()
-                    if (bitmap != null) {
-                        captureEngine?.captureBitmap(bitmap, onResult)
-                    } else {
-                        onResult(CaptureResult.Failure(IllegalStateException("Screen capture failed")))
-                    }
-                }
-            }, 150L)
-            return
-        }
-
-        pendingScreenCaptureResult = onResult
-        ensureScreenCapturePermission()
+        onResult(CaptureResult.Failure(IllegalStateException("Screen capture is disabled")))
     }
 
     private fun captureSingle(autofocus: Boolean = true) {
@@ -838,10 +696,6 @@ class MainActivity : AppCompatActivity() {
                 }
                 is CaptureResult.Failure -> setStatus(getString(R.string.error_capture, result.error.message.orEmpty()))
             }
-        }
-        if (screenCaptureMode) {
-            captureScreenUi(onResult)
-            return
         }
         val instance = controller
         if (instance == null) {
@@ -986,7 +840,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleAutoCapture() {
-        if (!screenCaptureMode && !hasCameraPermission()) {
+        if (!hasCameraPermission()) {
             runWithOverlayHidden { requestCameraPermission() }
             return
         }
@@ -1019,7 +873,7 @@ class MainActivity : AppCompatActivity() {
     private fun maybeRequestNotificationsAndStartAuto() {
         val request = AutoStartRequest(
             intervalMs = selectedIntervalMs(),
-            lens = controller?.currentLens() ?: CameraController.Lens.BACK,
+            lens = controller?.currentLens() ?: CameraController.Lens.FRONT,
             ultrawide = controller?.zoomSourceIsWide() ?: false,
             zoom = controller?.currentZoomRatio() ?: 1f,
         )
@@ -1046,44 +900,24 @@ class MainActivity : AppCompatActivity() {
         capturing = true
         refreshCaptureUi()
 
-        if (screenCaptureMode) {
-            autoScreenJob?.cancel()
-            var count = 0
-            autoScreenJob = lifecycleScope.launch {
-                while (isActive && capturing) {
-                    delay(request.intervalMs)
-                    if (!isActive || !capturing) break
-                    captureScreenUi { result ->
-                        if (result is CaptureResult.Success) {
-                            count++
-                            setStatus(getString(R.string.status_capture_active, request.intervalMs / 1000L, count))
-                            service?.updateCaptureNotification(request.intervalMs, count)
-                        } else if (result is CaptureResult.Failure) {
-                            Log.e("SCOS3", "Auto screen capture failed: ${result.error.message}")
-                        }
-                    }
-                }
-            }
-        } else {
-            val instance = controller
-            if (instance == null) {
-                setStatus(getString(R.string.error_capture, "Camera not ready"))
-                capturing = false
-                refreshCaptureUi()
-                return
-            }
+        val instance = controller
+        if (instance == null) {
+            setStatus(getString(R.string.error_capture, "Camera not ready"))
+            capturing = false
+            refreshCaptureUi()
+            return
+        }
 
-            var count = 0
-            instance.startIntervalCapture(request.intervalMs) { result ->
-                when (result) {
-                    is CaptureResult.Success -> {
-                        count++
-                        setStatus(getString(R.string.status_capture_active, request.intervalMs / 1000L, count))
-                        service?.updateCaptureNotification(request.intervalMs, count)
-                    }
-                    is CaptureResult.Failure -> {
-                        Log.e("SCOS3", "Interval capture failed: ${result.error.message}")
-                    }
+        var count = 0
+        instance.startIntervalCapture(request.intervalMs) { result ->
+            when (result) {
+                is CaptureResult.Success -> {
+                    count++
+                    setStatus(getString(R.string.status_capture_active, request.intervalMs / 1000L, count))
+                    service?.updateCaptureNotification(request.intervalMs, count)
+                }
+                is CaptureResult.Failure -> {
+                    Log.e("SCOS3", "Interval capture failed: ${result.error.message}")
                 }
             }
         }
@@ -1310,13 +1144,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onVolumeUpPressed() {
-        Log.d("SCOS3-VOL", "volume UP -> captureSingle or toggleAutoCapture")
+        Log.d("SCOS3-VOL", "volume UP -> toggleAutoCapture")
         runOnUiThread {
-            if (screenCaptureMode) {
-                if (!capturing && !bursting) captureSingle()
-            } else {
-                toggleAutoCapture()
-            }
+            toggleAutoCapture()
         }
     }
 
@@ -1343,11 +1173,7 @@ class MainActivity : AppCompatActivity() {
             }
             KeyEvent.KEYCODE_VOLUME_UP -> {
                 if (event.repeatCount == 0) {
-                    if (screenCaptureMode) {
-                        if (!capturing && !bursting) captureSingle()
-                    } else {
-                        toggleAutoCapture()
-                    }
+                    toggleAutoCapture()
                 }
                 true
             }

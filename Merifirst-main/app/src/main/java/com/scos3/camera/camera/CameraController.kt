@@ -28,6 +28,7 @@ import com.scos3.camera.capture.CaptureResult
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -68,7 +69,7 @@ class CameraController(context: Context) {
     private var imageCapture: ImageCapture? = null
     private var preview: Preview? = null
     private var imageAnalysis: ImageAnalysis? = null
-    private var lens: Lens = Lens.BACK
+    private var lens: Lens = Lens.FRONT
     private var zoomSource: ZoomSource = ZoomSource.LOGICAL
     private var lastTargetRatio = 1f
     private var configuredSize: Size? = null
@@ -139,14 +140,12 @@ class CameraController(context: Context) {
         applyRatio(lastTargetRatio)
 
         previewView.post {
-            if (previewView.width > 0 && previewView.height > 0) {
-                val point = previewView.meteringPointFactory.createPoint(previewView.width / 2f, previewView.height / 2f)
-                camera?.cameraControl?.startFocusAndMetering(
-                    FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
-                        .setAutoCancelDuration(2, java.util.concurrent.TimeUnit.SECONDS)
-                        .build()
-                )
-            }
+            val point = androidx.camera.core.SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(0.5f, 0.5f)
+            camera?.cameraControl?.startFocusAndMetering(
+                FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+                    .setAutoCancelDuration(2, TimeUnit.SECONDS)
+                    .build()
+            )
         }
     }
 
@@ -211,6 +210,10 @@ class CameraController(context: Context) {
         Camera2Interop.Extender(builder).apply {
             setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
             setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+            setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+            setCaptureRequestOption(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+            setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
+            setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
         }
         return builder.build().also {
             it.setSurfaceProvider(previewView.surfaceProvider)
@@ -251,7 +254,7 @@ class CameraController(context: Context) {
 
     private fun buildImageCapture(targetRotation: Int): ImageCapture {
         val builder = ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
             .setTargetRotation(targetRotation)
         configuredSize?.let { size ->
             val strategy = ResolutionStrategy(
@@ -264,6 +267,18 @@ class CameraController(context: Context) {
         }
         builder.setJpegQuality(configuredQuality)
         applyPhysicalCamera(builder)
+        Camera2Interop.Extender(builder).apply {
+            setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+            setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+            setCaptureRequestOption(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+            setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
+            setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
+            setCaptureRequestOption(CaptureRequest.SHADING_MODE, CaptureRequest.SHADING_MODE_HIGH_QUALITY)
+            setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
+            setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE, CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY)
+            setCaptureRequestOption(CaptureRequest.HOT_PIXEL_MODE, CaptureRequest.HOT_PIXEL_MODE_HIGH_QUALITY)
+        }
         return builder.build()
     }
 
@@ -397,10 +412,44 @@ class CameraController(context: Context) {
 
         val finish: (CaptureResult) -> Unit = { result ->
             focusCaptureInFlight.set(false)
-            onResult(result)
+            mainExecutor.execute { onResult(result) }
         }
 
-        captureEngine.captureSingle(capture, finish)
+        val cam = camera
+        if (cam == null) {
+            captureEngine.captureSingle(capture, finish)
+            return
+        }
+
+        val point = androidx.camera.core.SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(0.5f, 0.5f, 0.25f)
+        val action = FocusMeteringAction.Builder(
+            point,
+            FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE or FocusMeteringAction.FLAG_AWB
+        )
+            .setAutoCancelDuration(2, TimeUnit.SECONDS)
+            .build()
+
+        val focusFuture = runCatching {
+            cam.cameraControl.startFocusAndMetering(action)
+        }.getOrNull()
+
+        if (focusFuture == null) {
+            captureEngine.captureSingle(capture, finish)
+            return
+        }
+
+        val done = object : Runnable {
+            private var fired = false
+            override fun run() {
+                if (fired) return
+                fired = true
+                focusTimeoutHandler.removeCallbacks(this)
+                runCatching { captureEngine.captureSingle(capture, finish) }
+                    .onFailure { finish(CaptureResult.Failure(it)) }
+            }
+        }
+        focusFuture.addListener(done, mainExecutor)
+        focusTimeoutHandler.postDelayed(done, FOCUS_TIMEOUT_MS)
     }
 
     /** Enables/disables FACE auto-capture and wires the capture trigger. */
@@ -445,7 +494,12 @@ class CameraController(context: Context) {
 
     fun focusAtPoint(point: MeteringPoint) {
         camera?.cameraControl?.startFocusAndMetering(
-            FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE).build()
+            FocusMeteringAction.Builder(
+                point,
+                FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE or FocusMeteringAction.FLAG_AWB
+            )
+                .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                .build()
         )
     }
 

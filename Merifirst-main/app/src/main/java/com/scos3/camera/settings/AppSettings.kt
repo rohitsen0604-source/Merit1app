@@ -10,7 +10,7 @@ data class AppSettings(
     val resolution: CameraResolution? = null,
     val quality: JpegQuality = JpegQuality.HIGH,
     val intervalMs: Long = 2000L,
-    val defaultLens: CameraControllerLens = CameraControllerLens.BACK,
+    val defaultLens: CameraControllerLens = CameraControllerLens.FRONT,
     val emailEnabled: Boolean = false,
     val gallerySaveEnabled: Boolean = true,
     val gmail: GmailSettings = GmailSettings(),

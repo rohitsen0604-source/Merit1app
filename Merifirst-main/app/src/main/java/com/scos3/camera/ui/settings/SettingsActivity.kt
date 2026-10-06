@@ -128,16 +128,14 @@ class SettingsActivity : AppCompatActivity() {
                 this@SettingsActivity,
                 android.R.layout.simple_spinner_dropdown_item,
                 listOf(
-                    getString(R.string.lens_back),
                     getString(R.string.lens_front),
-                    getString(R.string.lens_screen),
+                    getString(R.string.lens_back)
                 ),
             )
             binding.lensSpinner.setSelection(
                 when (settings.defaultLens) {
-                    CameraControllerLens.FRONT -> 1
-                    CameraControllerLens.SCREEN -> 2
-                    else -> 0
+                    CameraControllerLens.BACK -> 1
+                    else -> 0 // FRONT lens default
                 }
             )
 
@@ -172,9 +170,8 @@ class SettingsActivity : AppCompatActivity() {
             ?.let { CameraResolution(it.width!!, it.height!!) }
         val quality = JpegQuality.entries.getOrElse(binding.qualitySpinner.selectedItemPosition) { JpegQuality.HIGH }
         val lens = when (binding.lensSpinner.selectedItemPosition) {
-            1 -> CameraControllerLens.FRONT
-            2 -> CameraControllerLens.SCREEN
-            else -> CameraControllerLens.BACK
+            1 -> CameraControllerLens.BACK
+            else -> CameraControllerLens.FRONT
         }
         val intervalMs = when (binding.intervalSpinner.selectedItemPosition) {
             0 -> 2000L
