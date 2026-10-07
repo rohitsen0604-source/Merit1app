@@ -936,10 +936,6 @@ class MainActivity : AppCompatActivity() {
         capturing = true
         refreshCaptureUi()
 
-        if (!blackActive) {
-            upper?.focusRing?.startFocusAnimation()
-        }
-
         val instance = controller
         if (instance == null) {
             setStatus(getString(R.string.error_capture, "Camera not ready"))
@@ -949,7 +945,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         var count = 0
-        instance.startIntervalCapture(request.intervalMs) { result ->
+        instance.startIntervalCapture(
+            intervalMs = request.intervalMs,
+            onFocusTick = {
+                if (!blackActive) {
+                    upper?.focusRing?.startFocusAnimation()
+                }
+            },
+        ) { result ->
             when (result) {
                 is CaptureResult.Success -> {
                     count++

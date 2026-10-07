@@ -62,6 +62,7 @@ class CaptureEngine(context: Context) {
     private var stopped = true
     private var currentIntervalMs: Long = 0L
     private var currentImageCapture: ImageCapture? = null
+    private var currentShotRunner: ((onFinish: (CaptureResult) -> Unit) -> Unit)? = null
     private var currentListener: ((CaptureResult) -> Unit)? = null
 
     private val appContext = context.applicationContext
@@ -148,11 +149,13 @@ class CaptureEngine(context: Context) {
      *
      * @param intervalMs spacing between capture attempts (2/4/6/10 s).
      * @param imageCapture the bound ImageCapture use case.
+     * @param onShotRunner optional shot executor (e.g. autofocus then capture) that executes each shot.
      * @param onResult posted on the main thread for every attempt.
      */
     fun startInterval(
         intervalMs: Long,
         imageCapture: ImageCapture,
+        onShotRunner: ((onFinish: (CaptureResult) -> Unit) -> Unit)? = null,
         onResult: (CaptureResult) -> Unit,
     ) {
         if (intervalMs <= 0L) return
@@ -161,10 +164,17 @@ class CaptureEngine(context: Context) {
         burstStopped = true
         currentIntervalMs = intervalMs
         currentImageCapture = imageCapture
+        currentShotRunner = onShotRunner
         currentListener = onResult
         stopped = false
         scheduleNext()
     }
+
+    fun startInterval(
+        intervalMs: Long,
+        imageCapture: ImageCapture,
+        onResult: (CaptureResult) -> Unit,
+    ) = startInterval(intervalMs, imageCapture, null, onResult)
 
     private fun scheduleNext() {
         if (stopped || scheduler.isShutdown) return
@@ -172,6 +182,7 @@ class CaptureEngine(context: Context) {
             override fun run() {
                 val capture = currentImageCapture
                 val listener = currentListener
+                val runner = currentShotRunner
                 if (capture == null || listener == null) return
                 if (!capturing.compareAndSet(false, true)) return
 
@@ -185,13 +196,19 @@ class CaptureEngine(context: Context) {
                     }
                 }, 6000L, TimeUnit.MILLISECONDS)
 
-                captureSingle(capture) { result ->
+                val onFinish: (CaptureResult) -> Unit = { result ->
                     watchdog.cancel(false)
                     capturing.set(false)
                     mainExecutor.execute { listener(result) }
                     if (!stopped) {
                         scheduledFuture = scheduler.schedule(this, currentIntervalMs, TimeUnit.MILLISECONDS)
                     }
+                }
+
+                if (runner != null) {
+                    runner(onFinish)
+                } else {
+                    captureSingle(capture, onFinish)
                 }
             }
         }
@@ -209,6 +226,7 @@ class CaptureEngine(context: Context) {
         scheduledFuture?.cancel(true)
         scheduledFuture = null
         currentImageCapture = null
+        currentShotRunner = null
         currentListener = null
         capturing.set(false)
         releaseWakeLock()

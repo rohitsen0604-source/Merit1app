@@ -408,7 +408,10 @@ class CameraController(context: Context) {
             onResult(CaptureResult.Failure(IllegalStateException("Camera not ready")))
             return
         }
-        if (!focusCaptureInFlight.compareAndSet(false, true)) return
+        if (!focusCaptureInFlight.compareAndSet(false, true)) {
+            captureEngine.captureSingle(capture, onResult)
+            return
+        }
 
         val finish: (CaptureResult) -> Unit = { result ->
             focusCaptureInFlight.set(false)
@@ -466,14 +469,33 @@ class CameraController(context: Context) {
     }
 
     /** Starts AUTO/INTERVAL capture on the currently bound ImageCapture use case. */
-    fun startIntervalCapture(intervalMs: Long, onResult: (CaptureResult) -> Unit) {
+    fun startIntervalCapture(
+        intervalMs: Long,
+        onFocusTick: (() -> Unit)?,
+        onResult: (CaptureResult) -> Unit,
+    ) {
         val capture = imageCapture
         if (capture == null) {
             onResult(CaptureResult.Failure(IllegalStateException("Camera not ready")))
             return
         }
-        captureEngine.startInterval(intervalMs, capture, onResult)
+        captureEngine.startInterval(
+            intervalMs = intervalMs,
+            imageCapture = capture,
+            onShotRunner = { finish ->
+                mainExecutor.execute {
+                    onFocusTick?.invoke()
+                    focusAndCapture(finish)
+                }
+            },
+            onResult = onResult,
+        )
     }
+
+    fun startIntervalCapture(
+        intervalMs: Long,
+        onResult: (CaptureResult) -> Unit,
+    ) = startIntervalCapture(intervalMs, null, onResult)
 
     fun stopIntervalCapture() = captureEngine.stopInterval()
 
